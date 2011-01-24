@@ -137,7 +137,6 @@ def make_t_ci(df, level, scale, alpha=0.10):
     lower = level - sigma * scale
     return lower, upper
 
-!
 def linear_dlm(y, x, mean_prior, var_prior, disc=0.9):
     """
 
@@ -193,3 +192,6 @@ class DLMResults(object):
 
     def __init__(self):
         pass
+
+if __name__ == '__main__':
+    pass
