@@ -8,16 +8,52 @@ import re
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+
 from pandas.util.testing import debug, set_trace as st
+from statlib.tools import chain_dot
 
 class DLM(object):
     """
     Simple univariate Bayesian Dynamic Linear Model with discount factor
+
+    Parameters
+    ----------
+    y : ndarray n x 1
+        Response variable
+    F : ndarray n x k
+        Regressor matrix
+    G : ndarray k x k
+        State transition matrix
+    mean_prior : tuple (mean, variance)
+        mean: length k
+        variance: k x k
+        Normal prior for mean response
+    var_prior : tuple (a, b)
+        Inverse-gamma prior for observation variance
+    discount : float
+        Wt = Ct * (1 - d) / d
     """
 
-    def __init__(self, y, x, mean_prior=None, var_prior=None, discount=0.9):
-        self.y, self.x = map(np.array, np.atleast_1d(y, x))
+    def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
+                 discount=0.9):
+        self.y = np.array(y)
         self.nobs = len(y)
+
+        if self.y.ndim == 1:
+            pass
+        else:
+            raise Exception
+
+        F = np.array(F)
+        if F.ndim == 1:
+            F = F.reshape((len(F), 1))
+        self.F = F
+
+        self.ndim = self.F.shape[1]
+
+        if G is None:
+            G = np.eye(self.ndim)
+        self.G = G
 
         self.mean_prior = mean_prior
         self.var_prior = var_prior
@@ -26,8 +62,8 @@ class DLM(object):
         self._compute_parameters()
 
     def _compute_parameters(self):
-        results = linear_dlm(self.y, self.x, self.mean_prior, self.var_prior,
-                             disc=self.disc)
+        results = linear_dlm(self.y, self.F, self.G, self.mean_prior,
+                             self.var_prior, disc=self.disc)
 
         self.df = results['df']
         self.var_est = results['var_est']
@@ -81,12 +117,12 @@ class DLM(object):
 
     @property
     def forecast(self):
-        return self.mu_mode[:-1] * self.x
+        return (self.F * self.mu_mode[:-1]).sum(1)
 
     @property
     def forc_std(self):
         Rt = self.mu_scale[:-1] / self.disc
-        Qt = self.x ** 2 * Rt + self.var_est[:-1]
+        Qt = self.F ** 2 * Rt + self.var_est[:-1]
         return np.sqrt(Qt)
 
     @property
@@ -131,13 +167,26 @@ class DLM(object):
         pass
 
 
+import unittest
+
+class TestDLM(unittest.TestCase):
+
+    def setUp(self):
+        pass
+
 def make_t_ci(df, level, scale, alpha=0.10):
     sigma = stats.t(df).ppf(1 - alpha / 2)
     upper = level + sigma * scale
     lower = level - sigma * scale
     return lower, upper
 
-def linear_dlm(y, x, mean_prior, var_prior, disc=0.9):
+def _result_array(*shape):
+    arr = np.empty(shape, dtype=float)
+    arr.fill(np.NaN)
+
+    return arr
+
+def linear_dlm(y, F, G, mean_prior, var_prior, disc=0.9):
     """
 
     Parameters
@@ -147,45 +196,51 @@ def linear_dlm(y, x, mean_prior, var_prior, disc=0.9):
     -------
 
     """
-    mprior, Cprior = mean_prior
-    n, d = var_prior
-    Sprior = d / n
 
-    mu_mode = [mprior]
-    mu_scale = [Cprior]
-    df = [n]
-    var_est = [d / n]
+    nobs = len(y)
+    k = F.shape[1]
+
+    mode = _result_array(nobs + 1, k)
+    C = _result_array(nobs + 1, k, k)
+    df = _result_array(nobs + 1)
+    S = _result_array(nobs + 1)
+
+    mode[0], C[0] = mean_prior
+    n, d = var_prior
+    df[0] = n
+    S[0] = d / n
 
     for i, obs in enumerate(y):
+        # column vector, for W&H notational consistency
+        Ft = F[i, :].T
+
+        # advance index: y_1 through y_nobs, 0 is prior
+        t = i + 1
+
         # derive innovation variance from discount factor
 
-        Ft = x[i]
+        Rt = chain_dot(G, C[t - 1], G.T) / disc
+        Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
 
-        Rt = Cprior / disc
-        Qt = Ft ** 2 * Rt + Sprior
-        At = Rt * Ft / Qt
+        # forecast theta as time t
+        a_t = np.dot(G, mode[t - 1])
+        f_t = np.dot(Ft.T, a_t)
 
-        forc_err = y[i] - Ft * mprior
+        forc_err = obs - f_t
 
-        # update obs error parameters
-        n += 1
-        St = Sprior = Sprior + (Sprior / n) * ((forc_err ** 2) / Qt - 1)
+        At = np.dot(Rt, Ft) / Qt
 
         # update mean parameters
-        mprior = mprior + At * forc_err
-
-        Cprior = Rt * St / Qt
-
-        df.append(n)
-        var_est.append(Sprior)
-        mu_mode.append(mprior)
-        mu_scale.append(Cprior)
+        mode[t] = a_t + np.dot(At, forc_err)
+        S[t] = S[t-1] + (S[t-1] / n) * ((forc_err ** 2) / Qt - 1)
+        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
+        df[t] = df[t - 1] + 1
 
     return {
         'df' : np.array(df),
-        'var_est' : np.array(var_est),
-        'mu_mode' : np.array(mu_mode),
-        'mu_scale' : np.array(mu_scale)
+        'var_est' : S,
+        'mu_mode' : mode,
+        'mu_scale' : C
     }
 
 class DLMResults(object):

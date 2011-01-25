@@ -101,4 +101,5 @@ if __name__ == '__main__':
     mean_prior = (0.45, 0.0025)
     var_prior = (1, 1)
 
-    model = DLM(y, x, mean_prior, var_prior, discount=1)
+    model = DLM(y, x, mean_prior=mean_prior,
+                var_prior=var_prior, discount=0.9)

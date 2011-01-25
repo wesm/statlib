@@ -157,3 +157,31 @@ def all_perms(iterable):
 
 def gamma_pdf(x, a, b):
     return np.exp((a - 1) * log(x) + a * log(b) - b * x - gammaln(a))
+
+
+def chain_dot(*arrs):
+    """
+    Returns the dot product of the given matrices.
+
+    Parameters
+    ----------
+    arrs: argument list of ndarray
+
+    Returns
+    -------
+    Dot product of all arguments.
+
+    Example
+    -------
+    >>> import numpy as np
+    >>> from scikits.statsmodels.tools import chain_dot
+    >>> A = np.arange(1,13).reshape(3,4)
+    >>> B = np.arange(3,15).reshape(4,3)
+    >>> C = np.arange(5,8).reshape(3,1)
+    >>> chain_dot(A,B,C)
+    array([[1820],
+       [4300],
+       [6780]])
+    """
+    return reduce(lambda x, y: np.dot(y, x), arrs[::-1])
+
