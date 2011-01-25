@@ -89,21 +89,25 @@ class DLM(object):
         ylim = (self.y.min() - 1 * ptp, self.y.max() + 1 * ptp)
         ax.set_ylim(ylim)
 
-    def plot_mu(self, alpha=0.10, prior=True, ax=None):
+    def plot_mu(self, alpha=0.10, prior=True, index=None, ax=None):
         if ax is None:
-            plt.figure()
-            ax = plt.subplot(111)
+            fig, axes = plt.subplots(nrows=self.ndim, sharex=True, squeeze=False)
+            # ax = plt.subplot(111)
 
-        level, (ci_lower, ci_upper) = self.mu_ci(prior=prior, alpha=alpha)
+        level, ci_lower, ci_upper = self.mu_ci(prior=prior, alpha=alpha)
 
         rng = np.arange(self.nobs)
-        ax.plot(rng, level, 'k--')
-        ax.plot(rng, ci_lower, 'k-.')
-        ax.plot(rng, ci_upper, 'k-.')
 
-        ptp = np.ptp(level)
-        ylim = (level.min() - 1 * ptp, level.max() + 1 * ptp)
-        ax.set_ylim(ylim)
+        for i, lev in enumerate(level.T):
+            ax = axes[i][0]
+
+            ax.plot(rng, lev, 'k--')
+            ax.plot(rng, ci_lower[:, i], 'k-.')
+            ax.plot(rng, ci_upper[:, i], 'k-.')
+
+            ptp = np.ptp(lev)
+            ylim = (lev.min() - 1 * ptp, lev.max() + 1 * ptp)
+            ax.set_ylim(ylim)
 
     @property
     def forc_dist(self):
@@ -121,8 +125,16 @@ class DLM(object):
 
     @property
     def forc_std(self):
-        Rt = self.mu_scale[:-1] / self.disc
-        return np.sqrt(chain_dot(Rt, self.F.T, self.F)).squeeze()
+        return np.sqrt(self.Q)
+
+    @property
+    def R(self):
+        return np.dot(self.G, np.dot(self.mu_scale, self.G.T))[0] / self.disc
+
+    @property
+    def Q(self):
+        return ((self.F.T * (self.R[:-1] * self.F).sum(1)).sum(0)
+                + self.var_est[:-1])
 
     @property
     def rmse(self):
@@ -146,7 +158,19 @@ class DLM(object):
     def mu_ci(self, alpha=0.10, prior=True):
         """
         If prior is False, compute posterior
+
+        TODO: need multivariate T distribution
         """
+        _x, _y = np.diag_indices(self.ndim)
+        diags = self.mu_scale[:, _x, _y]
+
+        adj = np.where(self.df > 2, np.sqrt(self.df / (self.df - 2)), 1)
+
+        if prior:
+            sd = np.sqrt(diags.T * adj / self.disc).T[:-1]
+        else:
+            sd = np.sqrt(diags.T * adj).T[1:]
+
         if prior:
             df = self.df[:-1]
             level = self.mu_mode[:-1]
@@ -156,7 +180,10 @@ class DLM(object):
             level = self.mu_mode[1:]
             scale = np.sqrt(self.mu_scale[1:])
 
-        return level, make_t_ci(df, level, scale, alpha=alpha)
+        ci_lower = level - 2 * sd
+        ci_upper = level + 2 * sd
+
+        return level, ci_lower, ci_upper # make_t_ci(df, level, scale, alpha=alpha)
 
     def forc_ci(self, alpha=0.05):
         return make_t_ci(self.df[:-1], self.forecast, self.forc_std,

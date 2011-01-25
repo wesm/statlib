@@ -89,6 +89,7 @@ def ex_310():
     ax1.legend()
     ax2.legend()
 
+    st()
     # plot s_42 and q_42
     ax3 = fig.add_subplot(313)
     ax3.plot(discount_factors, var_est, label='S')
@@ -102,4 +103,4 @@ if __name__ == '__main__':
     var_prior = (1, 1)
 
     model = DLM(y, x, mean_prior=mean_prior,
-                var_prior=var_prior, discount=0.9)
+                var_prior=var_prior, discount=0.7)
