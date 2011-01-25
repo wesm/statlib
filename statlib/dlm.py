@@ -59,16 +59,67 @@ class DLM(object):
         self.var_prior = var_prior
         self.disc = discount
 
+        self.mu_mode = _result_array(self.nobs + 1, self.ndim)
+        self.mu_scale = _result_array(self.nobs + 1, self.ndim, self.ndim)
+        self.df = _result_array(self.nobs + 1)
+        self.var_est = _result_array(self.nobs + 1)
+
+        self.mu_mode[0], self.mu_scale[0] = mean_prior
+        n, d = var_prior
+        self.df[0] = n
+        self.var_est[0] = d / n
+
         self._compute_parameters()
 
     def _compute_parameters(self):
-        results = linear_dlm(self.y, self.F, self.G, self.mean_prior,
-                             self.var_prior, disc=self.disc)
+        """
+        Compute parameter estimates for Gaussian Univariate DLM
 
-        self.df = results['df']
-        self.var_est = results['var_est']
-        self.mu_mode = results['mu_mode']
-        self.mu_scale = results['mu_scale']
+        Parameters
+        ----------
+
+        Notes
+        -----
+        West & Harrison pp. 111-112
+
+        Returns
+        -------
+
+        """
+        # allocate result arrays
+        mode = self.mu_mode
+        C = self.mu_scale
+        df = self.df
+        S = self.var_est
+
+        F = self.F
+        G = self.G
+
+        for i, obs in enumerate(self.y):
+            # column vector, for W&H notational consistency
+            Ft = F[i, :].T
+
+            # advance index: y_1 through y_nobs, 0 is prior
+            t = i + 1
+
+            # derive innovation variance from discount factor
+
+            Rt = chain_dot(G, C[t - 1], G.T) / self.disc
+            Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
+
+            # forecast theta as time t
+            a_t = np.dot(G, mode[t - 1])
+            f_t = np.dot(Ft.T, a_t)
+
+            forc_err = obs - f_t
+
+            At = np.dot(Rt, Ft) / Qt
+
+            # update mean parameters
+            df[t] = df[t - 1] + 1
+            mode[t] = a_t + np.dot(At, forc_err)
+            S[t] = S[t-1] + (S[t-1] / df[t]) * ((forc_err ** 2) / Qt - 1)
+            C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
     def plot_forc(self, alpha=0.10, ax=None):
         if ax is None:
@@ -218,69 +269,6 @@ def _result_array(*shape):
     arr.fill(np.NaN)
 
     return arr
-
-def linear_dlm(y, F, G, mean_prior, var_prior, disc=0.9):
-    """
-    Compute parameter estimates for Gaussian Univariate DLM
-
-    Parameters
-    ----------
-
-    Notes
-    -----
-    West & Harrison pp. 111-112
-
-    Returns
-    -------
-
-    """
-
-    nobs = len(y)
-    k = F.shape[1]
-
-    # allocate result arrays
-    mode = _result_array(nobs + 1, k)
-    C = _result_array(nobs + 1, k, k)
-    df = _result_array(nobs + 1)
-    S = _result_array(nobs + 1)
-
-    mode[0], C[0] = mean_prior
-    n, d = var_prior
-    df[0] = n
-    S[0] = d / n
-
-    for i, obs in enumerate(y):
-        # column vector, for W&H notational consistency
-        Ft = F[i, :].T
-
-        # advance index: y_1 through y_nobs, 0 is prior
-        t = i + 1
-
-        # derive innovation variance from discount factor
-
-        Rt = chain_dot(G, C[t - 1], G.T) / disc
-        Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
-
-        # forecast theta as time t
-        a_t = np.dot(G, mode[t - 1])
-        f_t = np.dot(Ft.T, a_t)
-
-        forc_err = obs - f_t
-
-        At = np.dot(Rt, Ft) / Qt
-
-        # update mean parameters
-        df[t] = df[t - 1] + 1
-        mode[t] = a_t + np.dot(At, forc_err)
-        S[t] = S[t-1] + (S[t-1] / df[t]) * ((forc_err ** 2) / Qt - 1)
-        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
-
-    return {
-        'df' : np.array(df),
-        'var_est' : S,
-        'mu_mode' : mode,
-        'mu_scale' : C
-    }
 
 class DLMResults(object):
 

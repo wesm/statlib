@@ -1,34 +1,17 @@
-from datetime import datetime
 import numpy as np
-import re
-import pandas as pn
 import scipy.stats as stats
+import matplotlib.pyplot as plt
 
 from statlib.tools import quantile
 
 import statlib.dlm as dlm
 reload(dlm)
-from statlib.dlm import *
+from statlib.dlm import DLM
 
-def load_table():
-    path = 'westharrison/data/Table2.2.data.txt'
-    sep = '\s+'
-
-    lines = [re.split(sep, l.strip()) for l in open(path)]
-
-    data = []
-    for line in lines:
-        # drop year
-        data.extend(line[1:])
-
-    data = np.array(data, dtype=float) / 100
-    dates = pn.DateRange(datetime(1975, 1, 1), periods=len(data),
-                         timeRule='EOM')
-
-    return pn.Series(data, index=dates)
+import datasets
 
 def ex_21():
-    y = load_table()
+    y = datasets.table_22()
     x = np.ones(len(y), dtype=float)
 
     mean_prior = (0, 1)
@@ -123,17 +106,17 @@ def boot_ci(sample, samples=10000):
     return quantile(draws, [0.05, 0.95])
 
 if __name__ == '__main__':
-    y = load_table()
+    y = datasets.table_22()
     x = np.ones(len(y), dtype=float)
 
     mean_prior = (0, 1)
     var_prior = (1, 0.01)
 
-    model3 = dlm.DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                    discount=0.1)
+    model3 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
+                 discount=0.1)
 
-    model = dlm.DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                    discount=1.)
-    model2 = dlm.DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                    discount=0.9)
+    model = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
+                discount=1.)
+    model2 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
+                 discount=0.9)
 

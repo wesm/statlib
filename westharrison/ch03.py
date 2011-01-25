@@ -1,52 +1,17 @@
-from datetime import datetime
 import numpy as np
-import re
-import pandas as pn
-
+import matplotlib.pyplot as plt
 import statlib.dlm as dlm
 reload(dlm)
-from statlib.dlm import *
+from statlib.dlm import DLM
 
-def load_table():
-    path = 'westharrison/data/Table3.3.data.txt'
-    sep = '\s+'
-
-    lines = [re.split(sep, l.strip()) for l in open(path)]
-
-    y_data = []
-    f_data = []
-    saw_f = False
-    for line in lines:
-        if line[0] == 'Y':
-            continue
-        elif line[0] == 'F':
-            saw_f = True
-            continue
-
-        # drop year
-        if saw_f:
-            f_data.extend(line[1:])
-        else:
-            y_data.extend(line[1:])
-
-    y_data = np.array(y_data, dtype=float)
-    f_data = np.array(f_data, dtype=float)
-
-    dates = pn.DateRange(datetime(1975, 1, 1), periods=len(y_data),
-                         timeRule='Q@MAR')
-
-    Y = pn.Series(y_data, index=dates)
-    F = pn.Series(f_data, index=dates)
-
-    return Y, F
+import datasets
 
 def ex_310():
-    y, x = load_table()
+    y, x = datasets.table_33()
 
     discount_factors = np.arange(0.60, 1.01, 0.05)
 
     rows, columns = 3, 3
-    rng = y.index
 
     rmse = []
     mad = []
@@ -95,7 +60,7 @@ def ex_310():
     ax3.legend()
 
 if __name__ == '__main__':
-    y, x = load_table()
+    y, x = datasets.table_33()
 
     mean_prior = (0.45, 0.0025)
     var_prior = (1, 1)
