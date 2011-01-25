@@ -98,9 +98,16 @@ class DLM(object):
 
         rng = np.arange(self.nobs)
 
-        for i, lev in enumerate(level.T):
-            ax = axes[i][0]
+        if index is None:
+            indices = range(self.ndim)
+        else:
+            indices = [index]
 
+        for i in indices:
+            if ax is None:
+                ax = axes[i][0]
+
+            lev = level[:, i]
             ax.plot(rng, lev, 'k--')
             ax.plot(rng, ci_lower[:, i], 'k-.')
             ax.plot(rng, ci_upper[:, i], 'k-.')

@@ -43,7 +43,7 @@ def load_table():
 def ex_310():
     y, x = load_table()
 
-    discount_factors = np.arange(0.05, 1.01, 0.05)
+    discount_factors = np.arange(0.60, 1.01, 0.05)
 
     rows, columns = 3, 3
     rng = y.index
@@ -65,9 +65,8 @@ def ex_310():
         like.append(model.pred_like)
 
         var_est.append(model.var_est[-1])
-        pred_var.append(model.var_est[-1] + model.mu_scale[-1] / disc)
+        pred_var.append(model.Q[-1]) # model.var_est[-1] + model.mu_scale[-1] / disc
 
-        continue
         ax = axes[i / rows][i % rows]
 
         # plot posterior
@@ -89,7 +88,6 @@ def ex_310():
     ax1.legend()
     ax2.legend()
 
-    st()
     # plot s_42 and q_42
     ax3 = fig.add_subplot(313)
     ax3.plot(discount_factors, var_est, label='S')
