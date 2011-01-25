@@ -14,7 +14,7 @@ from statlib.tools import chain_dot
 
 class DLM(object):
     """
-    Simple univariate Bayesian Dynamic Linear Model with discount factor
+    Bayesian Gaussian Dynamic Linear Model (DLM) with discount factor
 
     Parameters
     ----------
@@ -122,8 +122,7 @@ class DLM(object):
     @property
     def forc_std(self):
         Rt = self.mu_scale[:-1] / self.disc
-        Qt = self.F ** 2 * Rt + self.var_est[:-1]
-        return np.sqrt(Qt)
+        return np.sqrt(chain_dot(Rt, self.F.T, self.F)).squeeze()
 
     @property
     def rmse(self):
@@ -188,9 +187,14 @@ def _result_array(*shape):
 
 def linear_dlm(y, F, G, mean_prior, var_prior, disc=0.9):
     """
+    Compute parameter estimates for Gaussian Univariate DLM
 
     Parameters
     ----------
+
+    Notes
+    -----
+    West & Harrison pp. 111-112
 
     Returns
     -------
@@ -200,6 +204,7 @@ def linear_dlm(y, F, G, mean_prior, var_prior, disc=0.9):
     nobs = len(y)
     k = F.shape[1]
 
+    # allocate result arrays
     mode = _result_array(nobs + 1, k)
     C = _result_array(nobs + 1, k, k)
     df = _result_array(nobs + 1)
@@ -231,10 +236,10 @@ def linear_dlm(y, F, G, mean_prior, var_prior, disc=0.9):
         At = np.dot(Rt, Ft) / Qt
 
         # update mean parameters
-        mode[t] = a_t + np.dot(At, forc_err)
-        S[t] = S[t-1] + (S[t-1] / n) * ((forc_err ** 2) / Qt - 1)
-        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
         df[t] = df[t - 1] + 1
+        mode[t] = a_t + np.dot(At, forc_err)
+        S[t] = S[t-1] + (S[t-1] / df[t]) * ((forc_err ** 2) / Qt - 1)
+        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
     return {
         'df' : np.array(df),
