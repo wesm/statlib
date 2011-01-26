@@ -7,7 +7,7 @@ from statlib.dlm import DLM, st
 import datasets
 
 lam = 1.
-phis = np.arange(0.999, 1.004, .001)
+phis = np.arange(0.9, 1.1, .01)
 disc = 0.8
 y, x = datasets.table_33()
 
@@ -32,7 +32,7 @@ llr = np.log(lr)
 fig = plt.figure(figsize=(12, 12))
 
 ax1 = fig.add_subplot(211)
-ax1.plot(phis * 1000, lr, label='LR')
+ax1.plot(phis, lr, label='LR')
 ax2 = fig.add_subplot(212)
-ax2.plot(phis * 1000, llr, label='LogLR')
+ax2.plot(phis, llr, label='LogLR')
 plt.show()

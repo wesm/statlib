@@ -17,26 +17,9 @@ from pandas.util.testing import debug, set_trace as st
 from statlib.tools import chain_dot
 
 def nct_pdf(x, df, nc):
-    from numpy import sqrt, log, exp
-
-    import pdb
-    pdb.set_trace()
-
-    n = df*1.0
-    nc = nc*1.0
-    x2 = x*x
-    ncx2 = nc*nc*x2
-    fac1 = n + x2
-    trm1 = n/2.*log(n) + gamln(n+1)
-    trm1 -= n*log(2)+nc*nc/2.+(n/2.)*log(fac1)+gamln(n/2.)
-    Px = exp(trm1)
-    valF = ncx2 / (2*fac1)
-    trm1 = sqrt(2)*nc*x*special.hyp1f1(n/2+1,1.5,valF)
-    trm1 /= arr(fac1*special.gamma((n+1)/2))
-    trm2 = special.hyp1f1((n+1)/2,0.5,valF)
-    trm2 /= arr(sqrt(fac1)*special.gamma(n/2+1))
-    Px *= trm1+trm2
-    return Px
+    from rpy2.robjects import r
+    dt = r.dt
+    return dt(x, df, nc)
 
 class DLM(object):
     """
@@ -229,11 +212,13 @@ class DLM(object):
 
     @property
     def pred_like(self):
-        pdfs = []
-        for a, b, c in zip(self.y, self.df[:-1], self.ncp):
-            pdfs.append(nct_pdf(a, b, c))
+        # pdfs = []
+        # for a, b, c in zip(self.y, self.df[:-1], self.ncp):
+        #     pdfs.append(nct_pdf(a, b, c))
 
-        return np.array(pdfs)
+        # return np.array(pdfs)
+        return stats.t.pdf(self.y, self.df[:-1], loc=self.forecast,
+                           scale=self.forc_std)
 
     @property
     def pred_loglike(self):
