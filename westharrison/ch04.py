@@ -31,9 +31,8 @@ lr = like / like.max()
 llr = np.log(lr)
 fig = plt.figure(figsize=(12, 12))
 
-st()
-
 ax1 = fig.add_subplot(211)
-ax1.plot(phis, lr, label='LR')
+ax1.plot(phis * 1000, lr, label='LR')
 ax2 = fig.add_subplot(212)
-ax2.plot(phis, llr, label='LogLR')
+ax2.plot(phis * 1000, llr, label='LogLR')
+plt.show()

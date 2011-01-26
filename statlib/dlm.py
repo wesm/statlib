@@ -1,6 +1,8 @@
 """
 Implementing random things from West & Harrison
 """
+from __future__ import division
+
 
 from datetime import datetime
 import re
@@ -8,9 +10,33 @@ import re
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+import scipy.special as special
+from scipy.special import gammaln as gamln
 
 from pandas.util.testing import debug, set_trace as st
 from statlib.tools import chain_dot
+
+def nct_pdf(x, df, nc):
+    from numpy import sqrt, log, exp
+
+    import pdb
+    pdb.set_trace()
+
+    n = df*1.0
+    nc = nc*1.0
+    x2 = x*x
+    ncx2 = nc*nc*x2
+    fac1 = n + x2
+    trm1 = n/2.*log(n) + gamln(n+1)
+    trm1 -= n*log(2)+nc*nc/2.+(n/2.)*log(fac1)+gamln(n/2.)
+    Px = exp(trm1)
+    valF = ncx2 / (2*fac1)
+    trm1 = sqrt(2)*nc*x*special.hyp1f1(n/2+1,1.5,valF)
+    trm1 /= arr(fac1*special.gamma((n+1)/2))
+    trm2 = special.hyp1f1((n+1)/2,0.5,valF)
+    trm2 /= arr(sqrt(fac1)*special.gamma(n/2+1))
+    Px *= trm1+trm2
+    return Px
 
 class DLM(object):
     """
@@ -63,6 +89,9 @@ class DLM(object):
         self.mu_scale = _result_array(self.nobs + 1, self.ndim, self.ndim)
         self.df = _result_array(self.nobs + 1)
         self.var_est = _result_array(self.nobs + 1)
+        self.forc_var = _result_array(self.nobs)
+        self.R = _result_array(self.nobs + 1, self.ndim, self.ndim)
+        self.ncp = _result_array(self.nobs)
 
         self.mu_mode[0], self.mu_scale[0] = mean_prior
         n, d = var_prior
@@ -91,13 +120,12 @@ class DLM(object):
         C = self.mu_scale
         df = self.df
         S = self.var_est
-
         F = self.F
         G = self.G
 
         for i, obs in enumerate(self.y):
             # column vector, for W&H notational consistency
-            Ft = F[i, :].T
+            Ft = F[i:i+1].T
 
             # advance index: y_1 through y_nobs, 0 is prior
             t = i + 1
@@ -110,9 +138,7 @@ class DLM(object):
             # forecast theta as time t
             a_t = np.dot(G, mode[t - 1])
             f_t = np.dot(Ft.T, a_t)
-
             forc_err = obs - f_t
-
             At = np.dot(Rt, Ft) / Qt
 
             # update mean parameters
@@ -120,6 +146,14 @@ class DLM(object):
             mode[t] = a_t + np.dot(At, forc_err)
             S[t] = S[t-1] + (S[t-1] / df[t]) * ((forc_err ** 2) / Qt - 1)
             C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
+
+            n = df[t-1]
+            ncp = (f_t * np.sqrt(2 / n) *
+                   special.gamma(n/2) / special.gamma((n - 1) / 2))
+
+            self.ncp[t-1] = ncp
+            self.forc_var[t-1] = Qt
+            self.R[t] = Rt
 
     def plot_forc(self, alpha=0.10, ax=None):
         if ax is None:
@@ -142,12 +176,9 @@ class DLM(object):
 
     def plot_mu(self, alpha=0.10, prior=True, index=None, ax=None):
         if ax is None:
-            fig, axes = plt.subplots(nrows=self.ndim, sharex=True,
-                                     squeeze=False)
-            # ax = plt.subplot(111)
+            fig, axes = plt.subplots(nrows=self.ndim, sharex=True, squeeze=False)
 
         level, ci_lower, ci_upper = self.mu_ci(prior=prior, alpha=alpha)
-
         rng = np.arange(self.nobs)
 
         if index is None:
@@ -184,20 +215,7 @@ class DLM(object):
 
     @property
     def forc_std(self):
-        return np.sqrt(self.Q)
-
-    @property
-    def R(self):
-        dotprods = chain_dot(self.G, self.mu_scale, self.G.T)
-        return dotprods.swapaxes(0, 1) / self.disc
-
-    @property
-    def Q(self):
-        # so broadcasting will work correctly
-        R = self.R[:-1].swapaxes(0, 1)
-        F = self.F
-        st()
-        return (F.T * (F * R).sum(0)).sum(1) + self.var_est[:-1]
+        return np.sqrt(self.forc_var)
 
     @property
     def rmse(self):
@@ -211,8 +229,11 @@ class DLM(object):
 
     @property
     def pred_like(self):
-        return stats.t.pdf(self.y, self.df[:-1], loc=self.forecast,
-                           scale=self.forc_std)
+        pdfs = []
+        for a, b, c in zip(self.y, self.df[:-1], self.ncp):
+            pdfs.append(nct_pdf(a, b, c))
+
+        return np.array(pdfs)
 
     @property
     def pred_loglike(self):
