@@ -142,7 +142,8 @@ class DLM(object):
 
     def plot_mu(self, alpha=0.10, prior=True, index=None, ax=None):
         if ax is None:
-            fig, axes = plt.subplots(nrows=self.ndim, sharex=True, squeeze=False)
+            fig, axes = plt.subplots(nrows=self.ndim, sharex=True,
+                                     squeeze=False)
             # ax = plt.subplot(111)
 
         level, ci_lower, ci_upper = self.mu_ci(prior=prior, alpha=alpha)
@@ -187,12 +188,16 @@ class DLM(object):
 
     @property
     def R(self):
-        return np.dot(self.G, np.dot(self.mu_scale, self.G.T))[0] / self.disc
+        dotprods = chain_dot(self.G, self.mu_scale, self.G.T)
+        return dotprods.swapaxes(0, 1) / self.disc
 
     @property
     def Q(self):
-        return ((self.F.T * (self.R[:-1] * self.F).sum(1)).sum(0)
-                + self.var_est[:-1])
+        # so broadcasting will work correctly
+        R = self.R[:-1].swapaxes(0, 1)
+        F = self.F
+        st()
+        return (F.T * (F * R).sum(0)).sum(1) + self.var_est[:-1]
 
     @property
     def rmse(self):
