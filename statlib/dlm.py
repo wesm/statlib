@@ -8,6 +8,7 @@ from datetime import datetime
 import re
 
 import numpy as np
+import scipy.linalg as L
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import scipy.special as special
@@ -15,6 +16,7 @@ from scipy.special import gammaln as gamln
 
 from pandas.util.testing import debug, set_trace as st
 from statlib.tools import chain_dot
+from statlib.plotting import plotf
 
 def nct_pdf(x, df, nc):
     from rpy2.robjects import r
@@ -281,10 +283,245 @@ def _result_array(*shape):
 
     return arr
 
+class Component(object):
+    """
+    DLM component, can be combined with other components via superposition
+    """
+    def __init__(self, F, G, W=None, discount=1.):
+        self.F = F
+        self.G = G
+        self.discount = discount
+
+        self.W = W
+
+    def __add__(self, other):
+        if not isinstance(other, Component):
+            raise Exception('Can only add other DLM components!')
+
+        return Superposition(self, other)
+
+    def __radd__(self, other):
+        return Superposition(other, self)
+
+class Polynomial(Component):
+    """
+    nth order Polynomial DLM using Jordan form system matrix
+
+    Parameters
+    ----------
+    order : int
+    lam : float, default 1.
+    """
+    def __init__(self, order, lam=1., discount=1.):
+        self.order = order
+
+        F = _e_vector(order)
+        G = jordan_form(order, lam)
+        Component.__init__(self, F, G, discount=discount)
+
+    def __repr__(self):
+        return 'Polynomial(%d)' % self.order
+
+class Superposition(object):
+    """
+
+    """
+
+    def __init__(self, *comps):
+        self.comps = list(comps)
+
+    @property
+    def F(self):
+        return np.concatenate([c.F for c in self.comps])
+
+    @property
+    def G(self):
+        return L.block_diag(*[c.G for c in self.comps])
+
+    @property
+    def W(self):
+        return L.block_diag(*[c.G for c in self.comps])
+
+    @property
+    def discount(self):
+        pass
+
+    def __repr__(self):
+        reprs = ', '.join(repr(c) for c in self.comps)
+        return 'Superposition: [%s]' % reprs
+
+    def __add__(self, other):
+        if isinstance(other, Component):
+            new_comps = self.comps + [other]
+        elif isinstance(other, Superposition):
+            new_comps = self.comps + other.comps
+
+        return Superposition(*new_comps)
+
+    def __radd__(self):
+        pass
+
+class Jordan(Component):
+    """
+    Jordan block form
+    """
+    pass
+
+class ComplexJordan(Component):
+    """
+    Complex Jordan Block Form
+    """
+
+    def __init__(self):
+        pass
+
+class FormFreeSeasonal(Component):
+
+    def __init__(self, period, discount=1.):
+        F = _e_vector(period)
+        P = perm_matrix(period)
+        self.period = period
+        Component.__init__(self, F, P, discount=discount)
+
+    def __repr__(self):
+        return 'SeasonalFree(period=%d)' % self.period
+
+class FourierForm(Component):
+    """
+
+    """
+    def __init__(self, theta=None, discount=1.):
+        self.theta = theta
+        F = _e_vector(2)
+        G = fourier_matrix(theta)
+        Component.__init__(self, F, G, discount=discount)
+
+    def __repr__(self):
+        return 'FourierForm(%.4f)' % self.theta
+
+class FullEffectsFourier(Component):
+    """
+    Full effects Fourier form DLM rep'n
+
+    W&H pp. 252-254
+    """
+
+    def __init__(self, period, discount=1.):
+        period = int(period)
+        theta = 2 * np.pi / period
+        h = period // 2
+
+        self.period = period
+
+        model = None
+        for j in np.arange(1, h):
+            comp = FourierForm(theta=theta * j)
+            if model is None:
+                model = comp
+            else:
+                model += comp
+
+        if period % 2 == 1:
+            model += FourierForm(theta=h * theta)
+        else:
+            model += Polynomial(1, lam=-1.)
+
+        self.model = model
+
+        Component.__init__(self, self.model.F, self.model.G,
+                           discount=discount)
+
+def _e_vector(n):
+    result = np.zeros(n)
+    result[0] = 1
+    return result
+
+def perm_matrix(k):
+    """
+    Permutation matrix (is there a function for this?)
+    """
+    result = jordan_form(k, 0)
+    result[k-1, 0] = 1
+    return result
+
+def test_perm_matrix():
+    k = 6
+    P = perm_matrix(k)
+    assert(np.array_equal(np.linalg.matrix_power(P, k), np.eye(k)))
+    assert(np.array_equal(np.linalg.matrix_power(P, k + 1), P))
+
+def jordan_form(dim, lam=1):
+    """
+    Compute Jordan form matrix J_n(lambda)
+    """
+    inds = np.arange(dim)
+    result = np.zeros((dim, dim))
+    result[inds, inds] = lam
+
+    # set superdiagonal to ones
+    result[inds[:-1], 1 + inds[:-1]] = 1
+    return result
+
+def fourier_matrix(theta):
+    import math
+
+    arr = np.empty((2, 2))
+    cos = math.cos(theta)
+    sin = math.sin(theta)
+
+    arr[0,0] = arr[1,1] = cos
+    arr[0,1] = sin
+    arr[1,0] = sin
+
+    return arr
+
+def simulate_dlm():
+    pass
+
+def fourier_coefs(seq):
+    seq = np.asarray(seq)
+
+    p = len(seq)
+    theta = 2 * np.pi / p
+
+    angles = theta * np.outer(np.arange(p // 2 + 1), np.arange(p))
+    a = (np.cos(angles) * seq).sum(axis=1) * 2 / p
+    b = (np.sin(angles) * seq).sum(axis=1) * 2 / p
+
+    a[0] /= 2
+    a[-1] /= 2
+    return _zero_out(a), _zero_out(b)
+
+def plot_fourier_rep(seq, harmonic=None):
+    a, b = fourier_coefs(seq)
+    theta = 2 * np.pi / len(seq)
+
+    p = len(seq)
+
+    if harmonic is None:
+        # plot all harmonics
+        def f(t):
+            angles = theta * np.arange(p // 2 + 1) * t
+            return (a * np.cos(angles)).sum() + (b * np.sin(angles)).sum()
+    else:
+        def f(t):
+            j = harmonic
+            angle = theta * j * t
+            return a[j] * np.cos(angle) + b[j] * np.sin(angle)
+
+    plotf(np.vectorize(f, [np.float64]), 0, len(seq) + 1)
+    plt.vlines(np.arange(p), 0, seq)
+    plt.axhline(0)
+
+def _zero_out(arr, tol=1e-15):
+    return np.where(np.abs(arr) < tol, 0, arr)
+
 class DLMResults(object):
 
     def __init__(self):
         pass
 
 if __name__ == '__main__':
-    pass
+    seq = [1.65, 0.83, 0.41, -0.70, -.47, .40, -.05, -1.51,
+           -0.19, -1.02, -0.87, 1.52]
+
