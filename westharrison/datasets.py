@@ -3,6 +3,7 @@ import re
 
 import numpy as np
 import pandas as pn
+from pandas.io.parsers import parseCSV
 
 def table_22():
     path = 'westharrison/data/Table2.2.data.txt'
@@ -53,3 +54,31 @@ def table_33():
     F = pn.Series(f_data, index=dates)
 
     return Y, F
+
+def table_81():
+    """
+    Gas consumption data
+    """
+    path = 'westharrison/data/table81.csv'
+    return parseCSV(path, header=None)['B']
+
+def table_102():
+    path = 'westharrison/data/table102.csv'
+    return parseCSV(path)
+
+def foo():
+    path = 'westharrison/data/Table10.2.data.txt'
+    sep = '\s+'
+
+    lines = [re.split(sep, l.strip()) for l in open(path)]
+
+    datad = {}
+    for start in [0, 10]:
+        name = lines[start][0]
+        time_rule = lines[start + 1][0]
+        start_date = lines[start + 2][0]
+        data = np.concatenate(lines[start + 3:start+9]).astype(float)
+        dates = pn.DateRange(start_date, periods=len(data), timeRule=time_rule)
+        datad[name] = pn.Series(data, index=dates)
+
+    return pn.DataFrame(datad)

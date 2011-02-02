@@ -6,7 +6,7 @@ from statlib.tools import quantile
 
 import statlib.dlm as dlm
 reload(dlm)
-from statlib.dlm import DLM
+from statlib.dlm import DLM, ConstantDLM, st
 
 import datasets
 
@@ -50,7 +50,7 @@ def ex_21():
         # level and error bars for y_116, mu_115, V
 
         # mu_115
-        level, (lower, upper) = model.mu_ci(prior=False)
+        level, lower, upper = model.mu_ci(prior=False)
         mu.append((level[-1], lower[-1], upper[-1]))
 
         # var_est final
@@ -61,8 +61,8 @@ def ex_21():
         V.append((model.var_est[-1], lower, upper))
 
         # y_116
-        dist = stats.t(model.df[-1], loc=model.mu_mode[-1],
-                       scale=model.mu_scale[-1] / disc + model.var_est[-1])
+        dist = stats.t(model.df[-1], loc=model.mu_mode[-1, 0],
+                       scale=model.mu_scale[-1, 0] / disc + model.var_est[-1])
         lower, upper = boot_ci(dist.rvs)
         y_pred.append((model.mu_mode[-1], lower, upper))
 
@@ -96,6 +96,7 @@ def ex_21():
 
     ax3 = fig.add_subplot(313)
     level, lower, upper = zip(*y_pred)
+
     ax3.plot(discount_factors, level, 'k', label=r'$y_{116}$')
     ax3.plot(discount_factors, lower, 'k--')
     ax3.plot(discount_factors, upper, 'k--')
@@ -115,8 +116,8 @@ if __name__ == '__main__':
     model3 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
                  discount=0.1)
 
-    model = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                discount=1.)
+    model = ConstantDLM(y, [[1]], mean_prior=mean_prior, var_prior=var_prior,
+                        discount=.9)
     model2 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
                  discount=0.9)
 

@@ -7,7 +7,9 @@ from __future__ import division
 from datetime import datetime
 import re
 
+from numpy import log
 import numpy as np
+import numpy.linalg as npl
 import scipy.linalg as L
 import matplotlib.pyplot as plt
 import scipy.stats as stats
@@ -17,6 +19,8 @@ from scipy.special import gammaln as gamln
 from pandas.util.testing import debug, set_trace as st
 from statlib.tools import chain_dot
 from statlib.plotting import plotf
+import statlib.distributions as dist
+reload(dist)
 
 def nct_pdf(x, df, nc):
     from rpy2.robjects import r
@@ -105,12 +109,11 @@ class DLM(object):
         C = self.mu_scale
         df = self.df
         S = self.var_est
-        F = self.F
         G = self.G
 
         for i, obs in enumerate(self.y):
             # column vector, for W&H notational consistency
-            Ft = F[i:i+1].T
+            Ft = self._get_Ft(i)
 
             # advance index: y_1 through y_nobs, 0 is prior
             t = i + 1
@@ -139,6 +142,9 @@ class DLM(object):
             self.ncp[t-1] = ncp
             self.forc_var[t-1] = Qt
             self.R[t] = Rt
+
+    def _get_Ft(self, t):
+        return self.F[t:t+1].T
 
     def plot_forc(self, alpha=0.10, ax=None):
         if ax is None:
@@ -220,11 +226,13 @@ class DLM(object):
 
         # return np.array(pdfs)
         return stats.t.pdf(self.y, self.df[:-1], loc=self.forecast,
-                           scale=self.forc_std)
+                          scale=self.forc_std)
+        # return t_pdf(self.y, self.df[:-1], mode=self.forecast,
+        #              scale=self.forc_std)
 
     @property
     def pred_loglike(self):
-        return np.log(self.pred_like).sum()
+        return log(self.pred_like).sum()
 
     def mu_ci(self, alpha=0.10, prior=True):
         """
@@ -264,6 +272,23 @@ class DLM(object):
         pass
 
 
+class ConstantDLM(DLM):
+
+    def _get_Ft(self, t):
+        return self.F[0:1].T
+
+def t_pdf(x, df, mode=0., scale=1.):
+    """
+    Three-parameter t distribution
+    """
+    n = df * 1.0
+
+    part1 = gamln(0.5 * (n + 1)) - gamln(0.5 * n)
+    part2 = - 0.5 * log(np.pi * scale * n)
+    part3 = - 0.5 * (n + 1) * log(1 + (x - mode) ** 2 / (n * scale))
+    return np.exp(part1 + part2 + part3)
+
+
 import unittest
 
 class TestDLM(unittest.TestCase):
@@ -285,14 +310,16 @@ def _result_array(*shape):
 
 class Component(object):
     """
-    DLM component, can be combined with other components via superposition
+    Constant DLM component, can be combined with other components via
+    superposition
     """
     def __init__(self, F, G, W=None, discount=1.):
+        if F.ndim == 1:
+            F = np.atleast_2d(F)
+
         self.F = F
         self.G = G
         self.discount = discount
-
-        self.W = W
 
     def __add__(self, other):
         if not isinstance(other, Component):
@@ -302,6 +329,11 @@ class Component(object):
 
     def __radd__(self, other):
         return Superposition(other, self)
+
+class Regression(object):
+
+    def __init__(self, F, G, discount=1.):
+        pass
 
 class Polynomial(Component):
     """
@@ -332,14 +364,10 @@ class Superposition(object):
 
     @property
     def F(self):
-        return np.concatenate([c.F for c in self.comps])
+        return np.concatenate([c.F for c in self.comps], axis=1)
 
     @property
     def G(self):
-        return L.block_diag(*[c.G for c in self.comps])
-
-    @property
-    def W(self):
         return L.block_diag(*[c.G for c in self.comps])
 
     @property
@@ -403,15 +431,26 @@ class FullEffectsFourier(Component):
     """
     Full effects Fourier form DLM rep'n
 
+    Parameters
+    ----------
+    period : int
+    harmonics : sequence, default None
+        Optionally specify a subset of harmonics to use
+    discount : float
+
+    Notes
+    -----
     W&H pp. 252-254
     """
 
-    def __init__(self, period, discount=1.):
+    def __init__(self, period, harmonics=None, discount=1.):
         period = int(period)
         theta = 2 * np.pi / period
         h = period // 2
 
         self.period = period
+
+        comps = []
 
         model = None
         for j in np.arange(1, h):
@@ -421,15 +460,27 @@ class FullEffectsFourier(Component):
             else:
                 model += comp
 
-        if period % 2 == 1:
-            model += FourierForm(theta=h * theta)
-        else:
-            model += Polynomial(1, lam=-1.)
+            comps.append(comp)
 
+        if period % 2 == 1:
+            last_comp = FourierForm(theta=h * theta)
+        else:
+            last_comp = Polynomial(1, lam=-1.)
+
+        model += last_comp
+        comps.append(last_comp)
+
+        self.comps = comps
         self.model = model
 
         Component.__init__(self, self.model.F, self.model.G,
                            discount=discount)
+
+    @property
+    def L(self):
+        # W&H p. 254
+        return np.vstack([np.dot(self.F, npl.matrix_power(self.G, i))
+                          for i in range(self.period)])
 
 def _e_vector(n):
     result = np.zeros(n)
@@ -471,9 +522,9 @@ def fourier_matrix(theta):
 
     arr[0,0] = arr[1,1] = cos
     arr[0,1] = sin
-    arr[1,0] = sin
+    arr[1,0] = -sin
 
-    return arr
+    return _zero_out(arr)
 
 def simulate_dlm():
     pass
@@ -525,3 +576,4 @@ if __name__ == '__main__':
     seq = [1.65, 0.83, 0.41, -0.70, -.47, .40, -.05, -1.51,
            -0.19, -1.02, -0.87, 1.52]
 
+    fef = FullEffectsFourier(4)

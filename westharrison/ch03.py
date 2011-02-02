@@ -30,7 +30,7 @@ def ex_310():
         like.append(model.pred_like)
 
         var_est.append(model.var_est[-1])
-        pred_var.append(model.Q[-1]) # model.var_est[-1] + model.mu_scale[-1] / disc
+        pred_var.append(model.forc_var[-1]) # model.var_est[-1] + model.mu_scale[-1] / disc
 
         ax = axes[i / rows][i % rows]
 
