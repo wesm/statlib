@@ -185,3 +185,6 @@ def chain_dot(*arrs):
     """
     return reduce(lambda x, y: np.dot(y, x), arrs[::-1])
 
+
+def zero_out(arr, tol=1e-15):
+    return np.where(np.abs(arr) < tol, 0, arr)

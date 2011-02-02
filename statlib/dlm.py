@@ -1,11 +1,15 @@
 """
 Implementing random things from West & Harrison
+
+Notes on notation:
+
+Y_t = F_t' Th_t + nu_t
+Th_t = G_t th_{t-1} + \omega_t
+
+\nu_t \sim \cal{N}(0, V_t)
+\omega_t \sim \cal{N}(0, W_t)
 """
 from __future__ import division
-
-
-from datetime import datetime
-import re
 
 from numpy import log
 import numpy as np
@@ -17,7 +21,7 @@ import scipy.special as special
 from scipy.special import gammaln as gamln
 
 from pandas.util.testing import debug, set_trace as st
-from statlib.tools import chain_dot
+from statlib.tools import chain_dot, zero_out
 from statlib.plotting import plotf
 import statlib.distributions as dist
 reload(dist)
@@ -80,7 +84,6 @@ class DLM(object):
         self.var_est = _result_array(self.nobs + 1)
         self.forc_var = _result_array(self.nobs)
         self.R = _result_array(self.nobs + 1, self.ndim, self.ndim)
-        self.ncp = _result_array(self.nobs)
 
         self.mu_mode[0], self.mu_scale[0] = mean_prior
         n, d = var_prior
@@ -135,11 +138,6 @@ class DLM(object):
             S[t] = S[t-1] + (S[t-1] / df[t]) * ((forc_err ** 2) / Qt - 1)
             C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
-            n = df[t-1]
-            ncp = (f_t * np.sqrt(2 / n) *
-                   special.gamma(n/2) / special.gamma((n - 1) / 2))
-
-            self.ncp[t-1] = ncp
             self.forc_var[t-1] = Qt
             self.R[t] = Rt
 
@@ -164,6 +162,15 @@ class DLM(object):
         ptp = np.ptp(self.y)
         ylim = (self.y.min() - 1 * ptp, self.y.max() + 1 * ptp)
         ax.set_ylim(ylim)
+
+    def plot_forc_err(self, ax=None):
+        if ax is None:
+            plt.figure()
+            ax = plt.subplot(111)
+
+        err = self.y - self.forecast
+        ax.plot(err)
+        ax.axhline(0)
 
     def plot_mu(self, alpha=0.10, prior=True, index=None, ax=None):
         if ax is None:
@@ -313,7 +320,7 @@ class Component(object):
     Constant DLM component, can be combined with other components via
     superposition
     """
-    def __init__(self, F, G, W=None, discount=1.):
+    def __init__(self, F, G, W=None, discount=None):
         if F.ndim == 1:
             F = np.atleast_2d(F)
 
@@ -330,12 +337,22 @@ class Component(object):
     def __radd__(self, other):
         return Superposition(other, self)
 
-class Regression(object):
+class ConstantComponent(Component):
+    """
+    F matrix is the same at each time t
+    """
+    pass
 
-    def __init__(self, F, G, discount=1.):
-        pass
+class Regression(Component):
 
-class Polynomial(Component):
+    def __init__(self, F, discount=None):
+        if F.ndim == 1:
+            F = np.atleast_2d(F).T
+
+        G = np.eye(F.shape[1])
+        Component.__init__(self, F, G, discount=discount)
+
+class Polynomial(ConstantComponent):
     """
     nth order Polynomial DLM using Jordan form system matrix
 
@@ -344,7 +361,7 @@ class Polynomial(Component):
     order : int
     lam : float, default 1.
     """
-    def __init__(self, order, lam=1., discount=1.):
+    def __init__(self, order, lam=1., discount=None):
         self.order = order
 
         F = _e_vector(order)
@@ -362,9 +379,33 @@ class Superposition(object):
     def __init__(self, *comps):
         self.comps = list(comps)
 
+    def is_observable(self):
+        pass
+
     @property
     def F(self):
-        return np.concatenate([c.F for c in self.comps], axis=1)
+        length = None
+        for c in self.comps:
+            if not isinstance(c, ConstantComponent):
+                if length is None:
+                    length = len(c.F)
+                elif length != len(c.F):
+                    raise Exception('Length mismatch in dynamic components')
+
+
+        if length is None:
+            # all constant components
+            return np.concatenate([c.F for c in self.comps], axis=1)
+
+        to_concat = []
+        for c in self.comps:
+            F = c.F
+            if isinstance(c, ConstantComponent):
+                F = np.repeat(F, length, axis=0)
+
+            to_concat.append(F)
+
+        return np.concatenate(to_concat, axis=1)
 
     @property
     def G(self):
@@ -372,7 +413,31 @@ class Superposition(object):
 
     @property
     def discount(self):
-        pass
+        # TODO: FIX ME, LAZY-ness needed aboev
+
+        # W&H p. 198, case of multiple discount factors
+        k = len(self.G)
+        disc_matrix = np.ones((k, k))
+        j = 0
+
+        need_matrix = False
+        seen_factor = self.comps[0].discount
+        for c in self.comps:
+            if c.discount is None:
+                raise Exception("Must specify discount factor for all "
+                                "components or none of them")
+
+            if seen_factor != c.discount:
+                need_matrix = True
+
+            i = len(c.G)
+            disc_matrix[j : j + i, j : j + i] = c.discount
+            j += i
+
+        if need_matrix:
+            return disc_matrix
+        else:
+            return seen_factor
 
     def __repr__(self):
         reprs = ', '.join(repr(c) for c in self.comps)
@@ -389,9 +454,9 @@ class Superposition(object):
     def __radd__(self):
         pass
 
-class FormFreeSeasonal(Component):
+class FormFreeSeasonal(ConstantComponent):
 
-    def __init__(self, period, discount=1.):
+    def __init__(self, period, discount=None):
         F = _e_vector(period)
         P = perm_matrix(period)
         self.period = period
@@ -400,11 +465,11 @@ class FormFreeSeasonal(Component):
     def __repr__(self):
         return 'SeasonalFree(period=%d)' % self.period
 
-class FourierForm(Component):
+class FourierForm(ConstantComponent):
     """
 
     """
-    def __init__(self, theta=None, discount=1.):
+    def __init__(self, theta=None, discount=None):
         self.theta = theta
         F = _e_vector(2)
         G = fourier_matrix(theta)
@@ -413,7 +478,7 @@ class FourierForm(Component):
     def __repr__(self):
         return 'FourierForm(%.4f)' % self.theta
 
-class FullEffectsFourier(Component):
+class FullEffectsFourier(ConstantComponent):
     """
     Full effects Fourier form DLM rep'n
 
@@ -429,35 +494,30 @@ class FullEffectsFourier(Component):
     W&H pp. 252-254
     """
 
-    def __init__(self, period, harmonics=None, discount=1.):
+    def __init__(self, period, harmonics=None, discount=None):
         period = int(period)
         theta = 2 * np.pi / period
         h = period // 2
 
         self.period = period
+        self.comps = []
+        self.model = None
 
-        comps = []
+        for j in np.arange(1, h + 1):
+            if harmonics and j not in harmonics:
+                continue
 
-        model = None
-        for j in np.arange(1, h):
             comp = FourierForm(theta=theta * j)
-            if model is None:
-                model = comp
+
+            if j == h and period % 2 == 0:
+                comp = Polynomial(1, lam=-1.)
+
+            if self.model is None:
+                self.model = comp
             else:
-                model += comp
+                self.model += comp
 
-            comps.append(comp)
-
-        if period % 2 == 1:
-            last_comp = FourierForm(theta=h * theta)
-        else:
-            last_comp = Polynomial(1, lam=-1.)
-
-        model += last_comp
-        comps.append(last_comp)
-
-        self.comps = comps
-        self.model = model
+            self.comps.append(comp)
 
         Component.__init__(self, self.model.F, self.model.G,
                            discount=discount)
@@ -467,6 +527,13 @@ class FullEffectsFourier(Component):
         # W&H p. 254
         return np.vstack([np.dot(self.F, npl.matrix_power(self.G, i))
                           for i in range(self.period)])
+
+    @property
+    def H(self):
+        # p. 254. Transformation to convert seasonal effects to equivalent full
+        # effects Fourier form states
+        L = self.L
+        return np.dot(npl.inv(np.dot(L.T, L)), L.T)
 
 def _e_vector(n):
     result = np.zeros(n)
@@ -510,7 +577,7 @@ def fourier_matrix(theta):
     arr[0,1] = sin
     arr[1,0] = -sin
 
-    return _zero_out(arr)
+    return zero_out(arr)
 
 def simulate_dlm():
     pass
@@ -527,7 +594,7 @@ def fourier_coefs(seq):
 
     a[0] /= 2
     a[-1] /= 2
-    return _zero_out(a), _zero_out(b)
+    return zero_out(a), zero_out(b)
 
 def plot_fourier_rep(seq, harmonic=None):
     a, b = fourier_coefs(seq)
@@ -549,14 +616,6 @@ def plot_fourier_rep(seq, harmonic=None):
     plotf(np.vectorize(f, [np.float64]), 0, len(seq) + 1)
     plt.vlines(np.arange(p), 0, seq)
     plt.axhline(0)
-
-def _zero_out(arr, tol=1e-15):
-    return np.where(np.abs(arr) < tol, 0, arr)
-
-class DLMResults(object):
-
-    def __init__(self):
-        pass
 
 if __name__ == '__main__':
     seq = [1.65, 0.83, 0.41, -0.70, -.47, .40, -.05, -1.51,
