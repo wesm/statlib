@@ -12,9 +12,9 @@ p = 12
 
 var_prior = (1, 1)
 
-model = FullEffectsFourier(12)
+model = Polynomial(1) + FullEffectsFourier(12)
 k = model.F.shape[1]
 mean_prior = (np.zeros(k), np.eye(k))
 
 dlm = ConstantDLM(gas, model.F, G=model.G, mean_prior=mean_prior,
-                  var_prior=var_prior, discount=0.95)
+                  var_prior=var_prior, discount=.95)

@@ -389,20 +389,6 @@ class Superposition(object):
     def __radd__(self):
         pass
 
-class Jordan(Component):
-    """
-    Jordan block form
-    """
-    pass
-
-class ComplexJordan(Component):
-    """
-    Complex Jordan Block Form
-    """
-
-    def __init__(self):
-        pass
-
 class FormFreeSeasonal(Component):
 
     def __init__(self, period, discount=1.):
