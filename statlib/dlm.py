@@ -55,6 +55,7 @@ class DLM(object):
 
     def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
                  discount=0.9):
+        self.dates = y.index
         self.y = np.array(y)
         self.nobs = len(y)
 
@@ -149,7 +150,8 @@ class DLM(object):
             plt.figure()
             ax = plt.subplot(111)
 
-        rng = np.arange(self.nobs)
+        # rng = np.arange(self.nobs)
+        rng = self.dates # np.arange(self.nobs)
 
         ci_lower, ci_upper = self.forc_ci()
 
