@@ -37,7 +37,7 @@ H = seasonal_comp.H
 seasonal_prior_mean = np.dot(H, phi_effects)
 seasonal_prior_scale = zero_out(chain_dot(H, phi_scale, H.T))
 
-prior_mean = np.array(np.concatenate(([9.5, 1, -0.7],
+prior_mean = np.array(np.concatenate(([9.5, 1., -0.7],
                                       seasonal_prior_mean)))
 
 prior_scale = block_diag(np.diag([0.09, 0.09, 0.01]),
@@ -47,7 +47,7 @@ mean_prior = (prior_mean, prior_scale)
 
 # k = model.F.shape[1]
 
-dlm = ConstantDLM(sales, model.F, G=model.G,
-                  mean_prior=mean_prior,
-                  var_prior=var_prior,
-                  discount=model.discount)
+dlm = DLM(sales, model.F, G=model.G,
+          mean_prior=mean_prior,
+          var_prior=var_prior,
+          discount=model.discount)

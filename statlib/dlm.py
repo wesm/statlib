@@ -271,7 +271,7 @@ class DLM(object):
 
         return level, ci_lower, ci_upper # make_t_ci(df, level, scale, alpha=alpha)
 
-    def forc_ci(self, alpha=0.05):
+    def forc_ci(self, alpha=0.10):
         return make_t_ci(self.df[:-1], self.forecast, self.forc_std,
                          alpha=alpha)
 
