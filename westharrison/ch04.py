@@ -7,7 +7,7 @@ from statlib.dlm import DLM, st
 import datasets
 
 lam = 1.
-phis = np.arange(0.9, 1.1, .01)
+phis = np.arange(0.95, 1.05, .001)
 disc = 0.8
 y, x = datasets.table_33()
 
