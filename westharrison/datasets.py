@@ -56,14 +56,18 @@ def table_102():
     path = 'westharrison/data/table102.csv'
     return parseCSV(path)
 
+def table_111():
+    path = 'westharrison/data/table111.csv'
+    return parseCSV(path)['CP6']
+
 def foo():
-    path = 'westharrison/data/Table10.2.data.txt'
+    path = 'westharrison/data/Table11.1.data.txt'
     sep = '\s+'
 
     lines = [re.split(sep, l.strip()) for l in open(path)]
 
     datad = {}
-    for start in [0, 10]:
+    for start in [0]:
         name = lines[start][0]
         time_rule = lines[start + 1][0]
         start_date = lines[start + 2][0]

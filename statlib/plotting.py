@@ -12,12 +12,34 @@ from scikits.statsmodels.tsa.stattools import acf
 #-------------------------------------------------------------------------------
 # Graphing functions
 
-def density_plot(y, thresh=1e-10, style='k'):
+def density_plot(y, thresh=1e-10, style='k', ax=None):
+    """
+    Make kernel density plot of input data
+    """
     kde = stats.kde.gaussian_kde(y)
     plot_f_support(kde.evaluate, y.max(), y.min(),
-                    thresh=thresh, style=style)
+                    thresh=thresh, style=style, ax=ax)
 
-def plot_f_support(f, hi, lo, thresh=1e-10, style='k', N=5000):
+def plot_f_support(f, hi, lo, thresh=1e-10, style='k', N=5000, ax=None):
+    """
+    Attempt to plot input function (e.g. a probability density) over its support
+    (places where its value exceeds a certain threshold)
+
+    Parameters
+    ----------
+    f : function
+        Vectorized function, e.g. a scipy.stats distribution pdf
+    hi : float
+        Upper bound for search
+    lo : float
+        Lower bound for search
+    thresh : float
+
+    Returns
+    -------
+    handle : result of plot function
+    """
+
     intervals = np.linspace(lo - 10 * np.abs(lo),
                             hi + 10 * np.abs(hi), num=N)
     pdfs = f(intervals)
@@ -26,7 +48,11 @@ def plot_f_support(f, hi, lo, thresh=1e-10, style='k', N=5000):
     above = (pdfs > thresh)
     supp_l, supp_u = above.argmax(), (len(above) - above[::-1].argmax() - 1)
     xs = np.linspace(intervals[supp_l], intervals[supp_u], num=N)
-    plt.plot(xs, f(xs), style)
+
+    if ax is None:
+        ax = plt.gca()
+
+    return ax.plot(xs, f(xs), style)
 
 def joint_contour(z_func, xlim=(0, 1), ylim=(0, 1), n=50,
                   ncontours=20):

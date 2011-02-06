@@ -129,17 +129,13 @@ class DLM(object):
             t = i + 1
 
             # derive innovation variance from discount factor
-
-            a_t = np.dot(G, mode[t - 1])
-            Rt = chain_dot(G, C[t - 1], G.T) / self.disc
-
-            # if t > 1:
-            #     # only discount after first time step!
-            #     a_t = np.dot(G, mode[t - 1])
-            #     Rt = chain_dot(G, C[t - 1], G.T) / self.disc
-            # else:
-            #     a_t = mode[0]
-            #     Rt = C[0]
+            if t > 1:
+                # only discount after first time step! hmm
+                a_t = np.dot(G, mode[t - 1])
+                Rt = chain_dot(G, C[t - 1], G.T) / self.disc
+            else:
+                a_t = mode[0]
+                Rt = C[0]
 
             Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
             At = np.dot(Rt, Ft) / Qt
@@ -247,6 +243,7 @@ class DLM(object):
         return stats.t.pdf(self.y, self.df[:-1],
                            loc=self.forecast,
                            scale=np.sqrt(self.forc_var))
+
     @property
     def pred_loglike(self):
         return log(self.pred_like).sum()
@@ -258,13 +255,6 @@ class DLM(object):
         """
         _x, _y = np.diag_indices(self.ndim)
         diags = self.mu_scale[:, _x, _y]
-
-        # adj = np.where(self.df > 2, np.sqrt(self.df / (self.df - 2)), 1)
-
-        # if prior:
-        #     sd = np.sqrt(diags.T * adj / self.disc).T[:-1]
-        # else:
-        #     sd = np.sqrt(diags.T * adj).T[1:]
 
         # Only care about marginal scale
         delta = self.disc
@@ -293,6 +283,14 @@ class DLM(object):
 
     def fit(self, discount=0.9):
         pass
+
+def t_pdf(x, df):
+    from scipy.special import gammaln
+
+    part1 = gammaln((df + 1) / 2.) - gammaln(df / 2.)
+    part2 = - 0.5 * np.log(df * np.pi)
+    part3 = - 0.5 * (df + 1) * np.log(1 + x ** 2 / df)
+    return np.exp(part1 + part2 + part3)
 
 
 class ConstantDLM(DLM):
