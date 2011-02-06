@@ -210,7 +210,7 @@ class DLM(object):
             this_ax.plot(rng, ci_lower[:, i], 'k-.')
             this_ax.plot(rng, ci_upper[:, i], 'k-.')
 
-            ptp = np.ptp(lev)
+            ptp = lev.ptp()
             ylim = (lev.min() - 0.5 * ptp, lev.max() + 0.5 * ptp)
             this_ax.set_ylim(ylim)
 
