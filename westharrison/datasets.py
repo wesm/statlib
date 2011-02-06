@@ -5,23 +5,6 @@ import numpy as np
 import pandas as pn
 from pandas.io.parsers import parseCSV
 
-def table_22():
-    path = 'westharrison/data/Table2.2.data.txt'
-    sep = '\s+'
-
-    lines = [re.split(sep, l.strip()) for l in open(path)]
-
-    data = []
-    for line in lines:
-        # drop year
-        data.extend(line[1:])
-
-    data = np.array(data, dtype=float) / 100
-    dates = pn.DateRange(datetime(1975, 1, 1), periods=len(data),
-                         timeRule='EOM')
-
-    return pn.Series(data, index=dates)
-
 def table_33():
     path = 'westharrison/data/Table3.3.data.txt'
     sep = '\s+'
@@ -55,6 +38,13 @@ def table_33():
 
     return Y, F
 
+def table_22():
+    """
+    Gas consumption data
+    """
+    path = 'westharrison/data/table22.csv'
+    return parseCSV(path, header=None)['B']
+
 def table_81():
     """
     Gas consumption data
@@ -82,3 +72,21 @@ def foo():
         datad[name] = pn.Series(data, index=dates)
 
     return pn.DataFrame(datad)
+
+def parse_table_22():
+    path = 'westharrison/data/Table2.2.data.txt'
+    sep = '\s+'
+
+    lines = [re.split(sep, l.strip()) for l in open(path)]
+
+    data = []
+    for line in lines:
+        # drop year
+        data.extend(line[1:])
+
+    data = np.array(data, dtype=float) / 100
+    dates = pn.DateRange(datetime(1975, 1, 1), periods=len(data),
+                         timeRule='EOM')
+
+    return pn.Series(data, index=dates)
+

@@ -37,10 +37,10 @@ H = seasonal_comp.H
 seasonal_prior_mean = np.dot(H, phi_effects)
 seasonal_prior_scale = zero_out(chain_dot(H, phi_scale, H.T))
 
-prior_mean = np.array(np.concatenate(([9.5, 1., -0.7],
+prior_mean = np.array(np.concatenate(([9.5, 0., -0.7],
                                       seasonal_prior_mean)))
 
-prior_scale = block_diag(np.diag([0.09, 0.09, 0.01]),
+prior_scale = block_diag(np.diag([0.09, 0.01, 0.01]),
                          seasonal_prior_scale)
 
 mean_prior = (prior_mean, prior_scale)

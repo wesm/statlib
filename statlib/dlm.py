@@ -17,8 +17,6 @@ import numpy.linalg as npl
 import scipy.linalg as L
 import matplotlib.pyplot as plt
 import scipy.stats as stats
-import scipy.special as special
-from scipy.special import gammaln as gamln
 
 from pandas.util.testing import debug, set_trace as st
 from statlib.tools import chain_dot, zero_out
@@ -30,6 +28,12 @@ def nct_pdf(x, df, nc):
     from rpy2.robjects import r
     dt = r.dt
     return dt(x, df, nc)
+
+def _result_array(*shape):
+    arr = np.empty(shape, dtype=float)
+    arr.fill(np.NaN)
+
+    return arr
 
 class DLM(object):
     """
@@ -73,6 +77,7 @@ class DLM(object):
 
         if G is None:
             G = np.eye(self.ndim)
+
         self.G = G
 
         self.mean_prior = mean_prior
@@ -80,6 +85,7 @@ class DLM(object):
         self.disc = discount
 
         self.mu_mode = _result_array(self.nobs + 1, self.ndim)
+        self.mu_forc_mode = _result_array(self.nobs + 1, self.ndim)
         self.mu_scale = _result_array(self.nobs + 1, self.ndim, self.ndim)
         self.df = _result_array(self.nobs + 1)
         self.var_est = _result_array(self.nobs + 1)
@@ -124,21 +130,31 @@ class DLM(object):
 
             # derive innovation variance from discount factor
 
+            a_t = np.dot(G, mode[t - 1])
             Rt = chain_dot(G, C[t - 1], G.T) / self.disc
+
+            # if t > 1:
+            #     # only discount after first time step!
+            #     a_t = np.dot(G, mode[t - 1])
+            #     Rt = chain_dot(G, C[t - 1], G.T) / self.disc
+            # else:
+            #     a_t = mode[0]
+            #     Rt = C[0]
+
             Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
+            At = np.dot(Rt, Ft) / Qt
 
             # forecast theta as time t
-            a_t = np.dot(G, mode[t - 1])
             f_t = np.dot(Ft.T, a_t)
-            forc_err = obs - f_t
-            At = np.dot(Rt, Ft) / Qt
+            err = obs - f_t
 
             # update mean parameters
             df[t] = df[t - 1] + 1
-            mode[t] = a_t + np.dot(At, forc_err)
-            S[t] = S[t-1] + (S[t-1] / df[t]) * ((forc_err ** 2) / Qt - 1)
+            mode[t] = a_t + np.dot(At, err)
+            S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
             C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
+            self.mu_forc_mode[t] = a_t
             self.forc_var[t-1] = Qt
             self.R[t] = Rt
 
@@ -153,7 +169,7 @@ class DLM(object):
         # rng = np.arange(self.nobs)
         rng = self.dates # np.arange(self.nobs)
 
-        ci_lower, ci_upper = self.forc_ci()
+        ci_lower, ci_upper = self.forc_ci(alpha=alpha)
 
         ax.plot(rng, self.y, 'k.')
         ax.plot(rng, self.forecast, 'k--')
@@ -176,7 +192,8 @@ class DLM(object):
 
     def plot_mu(self, alpha=0.10, prior=True, index=None, ax=None):
         if ax is None:
-            fig, axes = plt.subplots(nrows=self.ndim, sharex=True, squeeze=False)
+            _, axes = plt.subplots(nrows=self.ndim, sharex=True, squeeze=False,
+                                   figsize=(12, 8))
 
         level, ci_lower, ci_upper = self.mu_ci(prior=prior, alpha=alpha)
         rng = np.arange(self.nobs)
@@ -188,16 +205,18 @@ class DLM(object):
 
         for i in indices:
             if ax is None:
-                ax = axes[i][0]
+                this_ax = axes[i][0]
+            else:
+                this_ax = ax
 
             lev = level[:, i]
-            ax.plot(rng, lev, 'k--')
-            ax.plot(rng, ci_lower[:, i], 'k-.')
-            ax.plot(rng, ci_upper[:, i], 'k-.')
+            this_ax.plot(rng, lev, 'k--')
+            this_ax.plot(rng, ci_lower[:, i], 'k-.')
+            this_ax.plot(rng, ci_upper[:, i], 'k-.')
 
             ptp = np.ptp(lev)
-            ylim = (lev.min() - 1 * ptp, lev.max() + 1 * ptp)
-            ax.set_ylim(ylim)
+            ylim = (lev.min() - 0.5 * ptp, lev.max() + 0.5 * ptp)
+            this_ax.set_ylim(ylim)
 
     @property
     def forc_dist(self):
@@ -211,11 +230,7 @@ class DLM(object):
 
     @property
     def forecast(self):
-        return (self.F * self.mu_mode[:-1]).sum(1)
-
-    @property
-    def forc_std(self):
-        return np.sqrt(self.forc_var)
+        return (self.F * self.mu_forc_mode[1:]).sum(1)
 
     @property
     def rmse(self):
@@ -229,52 +244,51 @@ class DLM(object):
 
     @property
     def pred_like(self):
-        # pdfs = []
-        # for a, b, c in zip(self.y, self.df[:-1], self.ncp):
-        #     pdfs.append(nct_pdf(a, b, c))
-
-        # return np.array(pdfs)
-        return stats.t.pdf(self.y, self.df[:-1], loc=self.forecast,
-                          scale=self.forc_std)
-        # return t_pdf(self.y, self.df[:-1], mode=self.forecast,
-        #              scale=self.forc_std)
-
+        return stats.t.pdf(self.y, self.df[:-1],
+                           loc=self.forecast,
+                           scale=np.sqrt(self.forc_var))
     @property
     def pred_loglike(self):
         return log(self.pred_like).sum()
 
-    def mu_ci(self, alpha=0.10, prior=True):
+    def mu_ci(self, alpha=0.10, prior=False):
         """
+        Compute marginal confidence intervals around each parameter \theta_{ti}
         If prior is False, compute posterior
-
-        TODO: need multivariate T distribution
         """
         _x, _y = np.diag_indices(self.ndim)
         diags = self.mu_scale[:, _x, _y]
 
-        adj = np.where(self.df > 2, np.sqrt(self.df / (self.df - 2)), 1)
+        # adj = np.where(self.df > 2, np.sqrt(self.df / (self.df - 2)), 1)
 
-        if prior:
-            sd = np.sqrt(diags.T * adj / self.disc).T[:-1]
-        else:
-            sd = np.sqrt(diags.T * adj).T[1:]
+        # if prior:
+        #     sd = np.sqrt(diags.T * adj / self.disc).T[:-1]
+        # else:
+        #     sd = np.sqrt(diags.T * adj).T[1:]
+
+        # Only care about marginal scale
+        delta = self.disc
+        if isinstance(delta, np.ndarray):
+            delta = np.diag(delta)
 
         if prior:
             df = self.df[:-1]
-            level = self.mu_mode[:-1]
-            scale = np.sqrt(self.mu_scale[:-1] / self.disc)
+            mode = self.mu_mode[:-1]
+            scale = np.sqrt(diags[:-1] / self.disc)
         else:
             df = self.df[1:]
-            level = self.mu_mode[1:]
-            scale = np.sqrt(self.mu_scale[1:])
+            mode = self.mu_mode[1:]
+            scale = np.sqrt(diags[1:])
 
-        ci_lower = level - 2 * sd
-        ci_upper = level + 2 * sd
+        q = stats.t(df).ppf(1 - alpha / 2)
+        band = (scale.T * q).T
+        ci_lower = mode - band
+        ci_upper = mode + band
 
-        return level, ci_lower, ci_upper # make_t_ci(df, level, scale, alpha=alpha)
+        return mode, ci_lower, ci_upper
 
     def forc_ci(self, alpha=0.10):
-        return make_t_ci(self.df[:-1], self.forecast, self.forc_std,
+        return make_t_ci(self.df[:-1], self.forecast, np.sqrt(self.forc_var),
                          alpha=alpha)
 
     def fit(self, discount=0.9):
@@ -285,18 +299,6 @@ class ConstantDLM(DLM):
 
     def _get_Ft(self, t):
         return self.F[0:1].T
-
-def t_pdf(x, df, mode=0., scale=1.):
-    """
-    Three-parameter t distribution
-    """
-    n = df * 1.0
-
-    part1 = gamln(0.5 * (n + 1)) - gamln(0.5 * n)
-    part2 = - 0.5 * log(np.pi * scale * n)
-    part3 = - 0.5 * (n + 1) * log(1 + (x - mode) ** 2 / (n * scale))
-    return np.exp(part1 + part2 + part3)
-
 
 import unittest
 
@@ -311,18 +313,12 @@ def make_t_ci(df, level, scale, alpha=0.10):
     lower = level - sigma * scale
     return lower, upper
 
-def _result_array(*shape):
-    arr = np.empty(shape, dtype=float)
-    arr.fill(np.NaN)
-
-    return arr
-
 class Component(object):
     """
     Constant DLM component, can be combined with other components via
     superposition
     """
-    def __init__(self, F, G, W=None, discount=None):
+    def __init__(self, F, G, discount=None):
         if F.ndim == 1:
             F = np.atleast_2d(F)
 
@@ -368,7 +364,7 @@ class Polynomial(ConstantComponent):
 
         F = _e_vector(order)
         G = jordan_form(order, lam)
-        Component.__init__(self, F, G, discount=discount)
+        ConstantComponent.__init__(self, F, G, discount=discount)
 
     def __repr__(self):
         return 'Polynomial(%d)' % self.order
@@ -415,7 +411,7 @@ class Superposition(object):
 
     @property
     def discount(self):
-        # TODO: FIX ME, LAZY-ness needed aboev
+        # TODO: FIX ME, LAZY-ness needed above
 
         # W&H p. 198, case of multiple discount factors
         k = len(self.G)
@@ -462,7 +458,7 @@ class FormFreeSeasonal(ConstantComponent):
         F = _e_vector(period)
         P = perm_matrix(period)
         self.period = period
-        Component.__init__(self, F, P, discount=discount)
+        ConstantComponent.__init__(self, F, P, discount=discount)
 
     def __repr__(self):
         return 'SeasonalFree(period=%d)' % self.period
@@ -475,7 +471,7 @@ class FourierForm(ConstantComponent):
         self.theta = theta
         F = _e_vector(2)
         G = fourier_matrix(theta)
-        Component.__init__(self, F, G, discount=discount)
+        ConstantComponent.__init__(self, F, G, discount=discount)
 
     def __repr__(self):
         return 'FourierForm(%.4f)' % self.theta
@@ -521,8 +517,8 @@ class FullEffectsFourier(ConstantComponent):
 
             self.comps.append(comp)
 
-        Component.__init__(self, self.model.F, self.model.G,
-                           discount=discount)
+        ConstantComponent.__init__(self, self.model.F, self.model.G,
+                                   discount=discount)
 
     @property
     def L(self):
@@ -534,8 +530,8 @@ class FullEffectsFourier(ConstantComponent):
     def H(self):
         # p. 254. Transformation to convert seasonal effects to equivalent full
         # effects Fourier form states
-        L = self.L
-        return np.dot(npl.inv(np.dot(L.T, L)), L.T)
+        el = self.L
+        return np.dot(npl.inv(np.dot(el.T, el)), el.T)
 
 def _e_vector(n):
     result = np.zeros(n)
@@ -584,25 +580,25 @@ def fourier_matrix(theta):
 def simulate_dlm():
     pass
 
-def fourier_coefs(seq):
-    seq = np.asarray(seq)
+def fourier_coefs(vals):
+    vals = np.asarray(vals)
 
-    p = len(seq)
+    p = len(vals)
     theta = 2 * np.pi / p
 
     angles = theta * np.outer(np.arange(p // 2 + 1), np.arange(p))
-    a = (np.cos(angles) * seq).sum(axis=1) * 2 / p
-    b = (np.sin(angles) * seq).sum(axis=1) * 2 / p
+    a = (np.cos(angles) * vals).sum(axis=1) * 2 / p
+    b = (np.sin(angles) * vals).sum(axis=1) * 2 / p
 
     a[0] /= 2
     a[-1] /= 2
     return zero_out(a), zero_out(b)
 
-def plot_fourier_rep(seq, harmonic=None):
-    a, b = fourier_coefs(seq)
-    theta = 2 * np.pi / len(seq)
+def plot_fourier_rep(vals, harmonic=None):
+    a, b = fourier_coefs(vals)
+    theta = 2 * np.pi / len(vals)
 
-    p = len(seq)
+    p = len(vals)
 
     if harmonic is None:
         # plot all harmonics
@@ -615,12 +611,12 @@ def plot_fourier_rep(seq, harmonic=None):
             angle = theta * j * t
             return a[j] * np.cos(angle) + b[j] * np.sin(angle)
 
-    plotf(np.vectorize(f, [np.float64]), 0, len(seq) + 1)
-    plt.vlines(np.arange(p), 0, seq)
+    plotf(np.vectorize(f, [np.float64]), 0, len(vals) + 1)
+    plt.vlines(np.arange(p), 0, vals)
     plt.axhline(0)
 
 if __name__ == '__main__':
-    seq = [1.65, 0.83, 0.41, -0.70, -.47, .40, -.05, -1.51,
+    vals = [1.65, 0.83, 0.41, -0.70, -.47, .40, -.05, -1.51,
            -0.19, -1.02, -0.87, 1.52]
 
     fef = FullEffectsFourier(4)
