@@ -9,6 +9,7 @@ import statlib.plotting as plotting
 
 reload(dlm)
 reload(multi)
+from statlib.dlm import *
 from statlib.multi import *
 import statlib.datasets as datasets
 

@@ -19,21 +19,16 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 
 from pandas.util.testing import debug, set_trace as st
-from statlib.tools import chain_dot, zero_out
+from statlib.tools import chain_dot, nan_array
 from statlib.plotting import plotf
-import statlib.distributions as dist
-reload(dist)
+import statlib.tools as tools
+import statlib.distributions as distm
+reload(distm)
 
 def nct_pdf(x, df, nc):
     from rpy2.robjects import r
     dt = r.dt
     return dt(x, df, nc)
-
-def _result_array(*shape):
-    arr = np.empty(shape, dtype=float)
-    arr.fill(np.NaN)
-
-    return arr
 
 class DLM(object):
     """
@@ -84,13 +79,13 @@ class DLM(object):
         self.var_prior = var_prior
         self.disc = discount
 
-        self.mu_mode = _result_array(self.nobs + 1, self.ndim)
-        self.mu_forc_mode = _result_array(self.nobs + 1, self.ndim)
-        self.mu_scale = _result_array(self.nobs + 1, self.ndim, self.ndim)
-        self.df = _result_array(self.nobs + 1)
-        self.var_est = _result_array(self.nobs + 1)
-        self.forc_var = _result_array(self.nobs)
-        self.R = _result_array(self.nobs + 1, self.ndim, self.ndim)
+        self.mu_mode = nan_array(self.nobs + 1, self.ndim)
+        self.mu_forc_mode = nan_array(self.nobs + 1, self.ndim)
+        self.mu_scale = nan_array(self.nobs + 1, self.ndim, self.ndim)
+        self.df = nan_array(self.nobs + 1)
+        self.var_est = nan_array(self.nobs + 1)
+        self.forc_var = nan_array(self.nobs)
+        self.R = nan_array(self.nobs + 1, self.ndim, self.ndim)
 
         self.mu_mode[0], self.mu_scale[0] = mean_prior
         n, d = var_prior
@@ -278,8 +273,8 @@ class DLM(object):
         return mode, ci_lower, ci_upper
 
     def forc_ci(self, alpha=0.10):
-        return make_t_ci(self.df[:-1], self.forecast, np.sqrt(self.forc_var),
-                         alpha=alpha)
+        return distm.make_t_ci(self.df[:-1], self.forecast,
+                               np.sqrt(self.forc_var), alpha=alpha)
 
     def fit(self, discount=0.9):
         pass
@@ -291,12 +286,6 @@ class ConstantDLM(DLM):
 
     def _get_Ft(self, t):
         return self.F[0:1].T
-
-def make_t_ci(df, level, scale, alpha=0.10):
-    sigma = stats.t(df).ppf(1 - alpha / 2)
-    upper = level + sigma * scale
-    lower = level - sigma * scale
-    return lower, upper
 
 class Component(object):
     """
@@ -348,7 +337,7 @@ class Polynomial(ConstantComponent):
         self.order = order
 
         F = _e_vector(order)
-        G = jordan_form(order, lam)
+        G = tools.jordan_form(order, lam)
         ConstantComponent.__init__(self, F, G, discount=discount)
 
     def __repr__(self):
@@ -441,7 +430,7 @@ class FormFreeSeasonal(ConstantComponent):
 
     def __init__(self, period, discount=None):
         F = _e_vector(period)
-        P = perm_matrix(period)
+        P = tools.perm_matrix(period)
         self.period = period
         ConstantComponent.__init__(self, F, P, discount=discount)
 
@@ -455,7 +444,7 @@ class FourierForm(ConstantComponent):
     def __init__(self, theta=None, discount=None):
         self.theta = theta
         F = _e_vector(2)
-        G = fourier_matrix(theta)
+        G = tools.fourier_matrix(theta)
         ConstantComponent.__init__(self, F, G, discount=discount)
 
     def __repr__(self):
@@ -523,64 +512,8 @@ def _e_vector(n):
     result[0] = 1
     return result
 
-def perm_matrix(k):
-    """
-    Permutation matrix (is there a function for this?)
-    """
-    result = jordan_form(k, 0)
-    result[k-1, 0] = 1
-    return result
-
-def test_perm_matrix():
-    k = 6
-    P = perm_matrix(k)
-    assert(np.array_equal(np.linalg.matrix_power(P, k), np.eye(k)))
-    assert(np.array_equal(np.linalg.matrix_power(P, k + 1), P))
-
-def jordan_form(dim, lam=1):
-    """
-    Compute Jordan form matrix J_n(lambda)
-    """
-    inds = np.arange(dim)
-    result = np.zeros((dim, dim))
-    result[inds, inds] = lam
-
-    # set superdiagonal to ones
-    result[inds[:-1], 1 + inds[:-1]] = 1
-    return result
-
-def fourier_matrix(theta):
-    import math
-
-    arr = np.empty((2, 2))
-    cos = math.cos(theta)
-    sin = math.sin(theta)
-
-    arr[0,0] = arr[1,1] = cos
-    arr[0,1] = sin
-    arr[1,0] = -sin
-
-    return zero_out(arr)
-
-def simulate_dlm():
-    pass
-
-def fourier_coefs(vals):
-    vals = np.asarray(vals)
-
-    p = len(vals)
-    theta = 2 * np.pi / p
-
-    angles = theta * np.outer(np.arange(p // 2 + 1), np.arange(p))
-    a = (np.cos(angles) * vals).sum(axis=1) * 2 / p
-    b = (np.sin(angles) * vals).sum(axis=1) * 2 / p
-
-    a[0] /= 2
-    a[-1] /= 2
-    return zero_out(a), zero_out(b)
-
 def plot_fourier_rep(vals, harmonic=None):
-    a, b = fourier_coefs(vals)
+    a, b = tools.fourier_coefs(vals)
     theta = 2 * np.pi / len(vals)
 
     p = len(vals)

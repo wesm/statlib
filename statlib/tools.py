@@ -26,6 +26,12 @@ def quantile(data, quantiles, axis=None):
     return np.array([_q(data, quantile * 100)
                      for quantile in quantiles])
 
+def nan_array(*shape):
+    arr = np.empty(shape, dtype=float)
+    arr.fill(np.NaN)
+
+    return arr
+
 #-------------------------------------------------------------------------------
 # Distribution-related functions
 
@@ -159,6 +165,10 @@ def gamma_pdf(x, a, b):
     return np.exp((a - 1) * log(x) + a * log(b) - b * x - gammaln(a))
 
 
+#-------------------------------------------------------------------------------
+# Array utils
+
+
 def chain_dot(*arrs):
     """
     Returns the dot product of the given matrices.
@@ -188,3 +198,56 @@ def chain_dot(*arrs):
 
 def zero_out(arr, tol=1e-15):
     return np.where(np.abs(arr) < tol, 0, arr)
+
+def perm_matrix(k):
+    """
+    Permutation matrix (is there a function for this?)
+    """
+    result = jordan_form(k, 0)
+    result[k-1, 0] = 1
+    return result
+
+def test_perm_matrix():
+    k = 6
+    P = perm_matrix(k)
+    assert(np.array_equal(np.linalg.matrix_power(P, k), np.eye(k)))
+    assert(np.array_equal(np.linalg.matrix_power(P, k + 1), P))
+
+def jordan_form(dim, lam=1):
+    """
+    Compute Jordan form matrix J_n(lambda)
+    """
+    inds = np.arange(dim)
+    result = np.zeros((dim, dim))
+    result[inds, inds] = lam
+
+    # set superdiagonal to ones
+    result[inds[:-1], 1 + inds[:-1]] = 1
+    return result
+
+def fourier_matrix(theta):
+    import math
+
+    arr = np.empty((2, 2))
+    cos = math.cos(theta)
+    sin = math.sin(theta)
+
+    arr[0,0] = arr[1,1] = cos
+    arr[0,1] = sin
+    arr[1,0] = -sin
+
+    return zero_out(arr)
+
+def fourier_coefs(vals):
+    vals = np.asarray(vals)
+
+    p = len(vals)
+    theta = 2 * np.pi / p
+
+    angles = theta * np.outer(np.arange(p // 2 + 1), np.arange(p))
+    a = (np.cos(angles) * vals).sum(axis=1) * 2 / p
+    b = (np.sin(angles) * vals).sum(axis=1) * 2 / p
+
+    a[0] /= 2
+    a[-1] /= 2
+    return zero_out(a), zero_out(b)
