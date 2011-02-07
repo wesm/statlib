@@ -15,6 +15,10 @@ class DLMMixture(object):
     Parameters
     ----------
     models : dict
+
+    Notes
+    -----
+    cf. W&H Section 12.2
     """
     def __init__(self, models):
         self.models = models
@@ -110,30 +114,48 @@ class DLMMixture(object):
             return tot
 
         # plot mixture
-        mix = plotting.plot_f_support(mix_pdf, -1, 1,
-                                      thresh=support_thresh,
-                                      style='k',
-                                      ax=ax)
+        mix = plotting.plot_support(mix_pdf, -1, 1,
+                                    thresh=support_thresh,
+                                    style='k',
+                                    ax=ax)
 
         for name in self.names:
-            comp = plotting.plot_f_support(dists[name].pdf, -1, 1,
-                                           thresh=support_thresh,
-                                           style='k--',
-                                           ax=ax)
+            comp = plotting.plot_support(dists[name].pdf, -1, 1,
+                                         thresh=support_thresh,
+                                         style='k--',
+                                         ax=ax)
 
         ax.legend((mix, comp), ('Mixture', 'Component'))
 
+class ApproximateMixture(object):
+    """
+    Class II type DLM mixture model. A model is chosen at each time point
+
+    Parameters
+    ----------
+    models : dict
+
+    Notes
+    -----
+    cf. W&H Section 12.2
+    """
+    def __init__(self):
+        pass
+
 if __name__ == '__main__':
-    y = datasets.table_22()
-    x = [[1]]
-    mean_prior = (0, 1)
-    var_prior = (1, 0.01)
-    discounts = np.arange(0.7, 1.01, 0.1)
+    cp6 = datasets.table_111()
 
-    models = {}
-    for delta in discounts:
-        models['%.2f' % delta] = ConstantDLM(y, x, mean_prior=mean_prior,
-                                             var_prior=var_prior, discount=delta)
+    W_matrices = {}
+    # construct evolution matrices
+    w_standard = np.array([[0.11, 0.01],
+                           [0.01, 0.01]])
+    w_outlier = np.array([[0.11, 0.01],
+                          [0.01, 0.01]])
 
-    mix = DLMMixture(models)
+    w_level_chg = np.array([[10.01, 0.01],
+                          [0.01, 0.01]])
+
+    w_growth_chg = np.array([[1.1, 1],
+                             [1, 1]])
+
 

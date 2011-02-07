@@ -284,26 +284,13 @@ class DLM(object):
     def fit(self, discount=0.9):
         pass
 
-def t_pdf(x, df):
-    from scipy.special import gammaln
-
-    part1 = gammaln((df + 1) / 2.) - gammaln(df / 2.)
-    part2 = - 0.5 * np.log(df * np.pi)
-    part3 = - 0.5 * (df + 1) * np.log(1 + x ** 2 / df)
-    return np.exp(part1 + part2 + part3)
-
-
 class ConstantDLM(DLM):
+    """
+
+    """
 
     def _get_Ft(self, t):
         return self.F[0:1].T
-
-import unittest
-
-class TestDLM(unittest.TestCase):
-
-    def setUp(self):
-        pass
 
 def make_t_ci(df, level, scale, alpha=0.10):
     sigma = stats.t(df).ppf(1 - alpha / 2)
