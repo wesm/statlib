@@ -368,20 +368,10 @@ class MultiProcessDLM(object):
         # degrees of freedom for T dist'n
         dist = stats.t(self.df[t - 1])
 
-        # rQ = np.sqrt(Qt)
-        # pi = self.prior_model_prob
-        # prior = self.marginal_prob[t - 1]
-        # result = pi * prior * dist.pdf(errs / rQ) / rQ
-
-        def calc_update(jt, jtp):
-            rQ = np.sqrt(Qt[jt, jtp])
-
-            # W&H eq. 12.40
-            pi = self.prior_model_prob[jt]
-            prior = self.marginal_prob[t - 1, jtp]
-            return pi * prior * dist.pdf(errs[jt, jtp] / rQ) / rQ
-
-        result = self._fill_updates(calc_update, ())
+        rQ = np.sqrt(Qt)
+        pi = self.prior_model_prob
+        prior = self.marginal_prob[t - 1]
+        result = ((prior * dist.pdf(errs / rQ) / rQ).T * pi).T
 
         # normalize
         return result / result.sum()
@@ -475,6 +465,36 @@ class MultiProcessDLM(object):
                      hi=self.forecast[t].max(),
                      lo=self.forecast[t].min(),
                      support_thresh=thresh)
+
+    def plot_post_prob(self):
+        fig, axes = plt.subplots(nrows=self.nmodels, sharex=True,
+                                 sharey=True)
+
+        rng = np.arange(len(self.marginal_prob))
+        for i in range(self.nmodels):
+            ax = axes[i]
+            ax.bar(rng, self.marginal_prob[:, i], color='k', width=0.5)
+
+    def plot_forecast(self):
+        # Figure 12.5
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+
+        rng = self.dates
+        ax.plot(self.dates, self.y, 'k')
+        forcs = self.forecast[1:]
+        probs = self.marginal_prob[:-1]
+
+        for i in range(self.nmodels):
+            for j, d in enumerate(self.dates):
+                ax.plot([d], forcs[j, i], 'ko', ms=probs[j, i] * 6)
+
+        hlines = [11, 24, 36]
+        for h in hlines:
+            ax.axvline(self.dates[h], color='k')
+
+        fig.autofmt_xdate()
 
 class Model(object):
     """
