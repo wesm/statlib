@@ -256,8 +256,8 @@ class MultiProcessDLM(object):
             # collapse variance estimates
             coll_St = self._collapse_var(St, post_prob, marginal_post)
 
-            # select one j_t-1
-            pstar = (coll_St / St[:, 0]) * (post_prob[:, 0] / marginal_post)
+            # p*_t(j_t, j_t-1) = (St(jt) / St(jt, jtp)) * pt(jt, jtp) / pt(jt)
+            pstar = ((coll_St / St.T) * (post_prob.T / marginal_post)).T
 
             # collapse posterior means / scales
             coll_m, coll_C = self._collapse_params(pstar, mt, Ct)
@@ -408,14 +408,14 @@ class MultiProcessDLM(object):
 
             # collapse modes
             for jtp in range(self.nmodels):
-                m += pstar[jtp] * mt[jt, jtp]
+                m += pstar[jt, jtp] * mt[jt, jtp]
 
             coll_m[jt] = m
 
             # collapse scales
             for jtp in range(self.nmodels):
                 mdev = coll_m[jt] - mt[jt, jtp]
-                C += pstar[jtp] * (Ct[jt, jtp] + np.outer(mdev, mdev))
+                C += pstar[jt, jtp] * (Ct[jt, jtp] + np.outer(mdev, mdev))
 
             coll_C[jt] = C
 
