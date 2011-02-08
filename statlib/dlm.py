@@ -82,14 +82,13 @@ class DLM(object):
         self.mu_mode = nan_array(self.nobs + 1, self.ndim)
         self.mu_forc_mode = nan_array(self.nobs + 1, self.ndim)
         self.mu_scale = nan_array(self.nobs + 1, self.ndim, self.ndim)
-        self.df = nan_array(self.nobs + 1)
         self.var_est = nan_array(self.nobs + 1)
         self.forc_var = nan_array(self.nobs)
         self.R = nan_array(self.nobs + 1, self.ndim, self.ndim)
 
         self.mu_mode[0], self.mu_scale[0] = mean_prior
         n, d = var_prior
-        self.df[0] = n
+        self.df = n + np.arange(self.nobs + 1) # precompute
         self.var_est[0] = d / n
 
         self._compute_parameters()
@@ -140,7 +139,6 @@ class DLM(object):
             err = obs - f_t
 
             # update mean parameters
-            df[t] = df[t - 1] + 1
             mode[t] = a_t + np.dot(At, err)
             S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
             C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)

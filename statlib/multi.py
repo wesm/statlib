@@ -3,6 +3,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 from statlib.tools import nan_array, chain_dot
+from statlib.dlm import st
 import statlib.tools as tools
 import statlib.plotting as plotting
 
@@ -171,6 +172,14 @@ class MultiProcessDLM(object):
         else:
             raise Exception
 
+        F = np.array(F)
+        if F.ndim == 1:
+            F = F.reshape((len(F), 1))
+        self.F = F
+
+        self.ndim = self.F.shape[1]
+        self.nmodels = len(models)
+
         self.names = order
         self.models = [models[name] for name in order]
         self.prior_model_prob = np.array([prior_model_prob[name]
@@ -183,9 +192,6 @@ class MultiProcessDLM(object):
         self.mean_prior = mean_prior
         self.var_prior = var_prior
 
-        self.nmodels = len(models)
-        self.ndim = len(mean_prior[0])
-
         # set up result storage for all the models
         self.model_prob = nan_array(self.nobs + 1, self.nmodels)
 
@@ -193,19 +199,26 @@ class MultiProcessDLM(object):
         self.mu_forc_mode = nan_array(self.nobs + 1, self.nmodels, self.ndim)
         self.mu_scale = nan_array(self.nobs + 1, self.nmodels,
                                   self.ndim, self.ndim)
-        self.forc_var = nan_array(self.nobs, self.nmodels)
+        self.mu_forc_var = nan_array(self.nobs + 1, self.nmodels, self.nmodels,
+                                     self.ndim, self.ndim)
 
-        self.var_est = nan_array(self.nobs + 1)
+        self.forecast = nan_array(self.nobs + 1, self.nmodels)
 
-        self.R = nan_array(self.nobs + 1, self.nmodels,
-                           self.ndim, self.ndim)
+        # relative multiplier!
+        self.var_est = nan_array(self.nobs + 1, self.nmodels)
 
-        self.mu_mode[0], self.mu_scale[0] = mean_prior
+        # forecasts are computed via mixture for now
+        self.forc_var = nan_array(self.nobs, self.nmodels, self.nmodels)
+
         n, d = var_prior
-        self.var_est[0] = d / n
-        self.df = n + np.arange(self.nobs + 1) # why not precompute
 
-        # self._compute_parameters()
+        # set in initial values
+        self.model_prob[0] = self.prior_model_prob
+        self.mu_mode[0], self.mu_scale[0] = mean_prior
+        self.var_est[0] = d / n
+        self.df = n + np.arange(self.nobs + 1) # precompute
+
+        self._compute_parameters()
 
     def _compute_parameters(self):
         """
@@ -222,92 +235,165 @@ class MultiProcessDLM(object):
         -------
 
         """
-        # allocate result arrays
-        mode = self.mu_mode
-        C = self.mu_scale
-        df = self.df
-        S = self.var_est
-        G = self.G
-
         for i, obs in enumerate(self.y):
+            Ft = self._get_Ft(i)
+
             # advance index: y_1 through y_nobs, 0 is prior
             t = i + 1
 
-            a_t = self._update_at(t)
+            at = self._update_at(t)
             Rt = self._update_Rt(t)
-            ft = self._update_ft(t)
-            Qt = self._update_Qt(t)
-            mt = self._update_mt(t)
-
-            for jt in range(self.nmodels):
-                for jtp in range(self.nmodels):
-                    pass
+            Qt = self._update_Qt(t, Ft, Rt)
+            At = self._update_At(Ft, Rt, Qt)
 
             # forecast theta as time t
-            err = obs - f_t
+            ft = self._update_ft(Ft, at)
+            errs = obs - ft
+            mt = self._update_mt(at, At, errs)
+            St = self._update_St(t, Qt, errs)
+            Ct = self._update_Ct(t, Rt, Qt, At, St)
 
             # update posterior model probabilities
 
-
+            # p_t(j_t, j_t-1)
+            post_prob = self._update_postprob(t, errs, Qt)
+            # p_t(j_t)
+            marginal_post = post_prob.sum(axis=1)
 
             # collapse variance estimates
+            coll_St = self._collapse_var(St, post_prob, marginal_post)
+
+            # select one j_t-1
+            pstar = (coll_St / St[:, 0]) * (post_prob[:, 0] / marginal_post)
 
             # collapse posterior means / scales
-            pstar = None # need to compute this
-
             coll_m, coll_C = self._collapse_params(pstar, mt, Ct)
 
+            # store results
             self.mu_mode[t] = coll_m
             self.mu_scale[t] = coll_C
-            self.mu_forc_mode[t] = a_t
+            self.var_est[t] = coll_St
             self.forc_var[t-1] = Qt
-            self.R[t] = Rt
+
+            # both are same for each jt
+            self.mu_forc_mode[t] = at[0]
+            self.forecast[t] = ft[0]
+
+            self.mu_forc_var[t] = Rt
 
     def _update_at(self, t):
-        result = nan_array(self.nmodels, self.ndim)
-        for j in range(self.nmodels):
-            prior_mode = self.mu_mode[t - 1, j]
-            result[j] = np.dot(self.G, prior_mode) if t > 1 else prior_mode
+        def calc_update(jt, jtp):
+            prior_mode = self.mu_mode[t - 1, jtp]
+            G = self.models[jt].G
+            # use prior for t=1, though not sure exactly why
+            return np.dot(G, prior_mode) if t > 1 else prior_mode
 
-        return result
+        return self._fill_updates(calc_update, (self.ndim,))
 
     def _update_Rt(self, t):
-        result = nan_array(self.nmodels, self.nmodels,
-                           self.ndim, self.ndim)
-        G = self.G
-        for jt in range(self.nmodels):
+        def calc_update(jt, jtp):
             model = self.models[jt]
+            G = model.G
+            prior_scale = self.mu_scale[t - 1, jtp]
+            if t > 1:
+                # only discount after first time step! hmm
+                Wt = model.get_Wt(prior_scale)
+                Rt = chain_dot(G, prior_scale, G.T) + Wt
+            else:
+                # use prior for t=1, because Mike does
+                Rt = prior_scale
 
-            for jtp in range(self.nmodels):
-                prior_scale = self.mu_scale[t - 1, jt]
-                if t > 1:
-                    # only discount after first time step! hmm
-                    Wt = model.get_Wt(prior_scale)
-                    Rt = chain_dot(G, prior_scale, G.T) + Wt
-                else:
-                    Rt = prior_scale
+            return Rt
 
-                result[jt, jtp] = Rt
+        return self._fill_updates(calc_update, (self.ndim, self.ndim))
 
-        return result
+    def _update_Qt(self, t, Ft, Rt):
+        def calc_update(jt, jtp):
+            prior_obs_var = (self.var_est[t - 1, jtp] *
+                             self.models[jt].obs_var_mult)
+            return chain_dot(Ft.T, Rt[jt, jtp], Ft) + prior_obs_var
 
-    def _update_Qt(self, t, Rt):
-        Ft = self._get_Ft(t)
-        result = nan_array(self.nmodels, self.nmodels,
-                           self.ndim, self.ndim)
+        return self._fill_updates(calc_update, ())
+
+    def _update_ft(self, Ft, at):
+        def calc_update(jt, jtp):
+            return np.dot(Ft.T, at[jt, jtp])
+
+        return self._fill_updates(calc_update, ())
+
+    def _update_At(self, Ft, Rt, Qt):
+        def calc_update(jt, jtp):
+            return np.dot(Rt[jt, jtp], Ft) / Qt[jt, jtp]
+
+        return self._fill_updates(calc_update, (self.ndim,))
+
+    def _update_mt(self, at, At, errs):
+        def calc_update(jt, jtp):
+            return at[jt, jtp] + np.dot(At[jt, jtp], errs[jt, jtp])
+
+        return self._fill_updates(calc_update, (self.ndim,))
+
+    def _update_St(self, t, Qt, errs):
+        def calc_update(jt, jtp):
+            prior = self.var_est[t - 1, jtp]
+            Q = Qt[jt, jtp]
+            e = errs[jt, jtp]
+            return prior + (prior / self.df[t]) * ((e ** 2) / Q - 1)
+
+        return self._fill_updates(calc_update, ())
+
+    def _update_Ct(self, t, Rt, Qt, At, St):
+        def calc_update(jt, jtp):
+            R = Rt[jt, jtp]
+            A = At[jt, jtp]
+            Q = Qt[jt, jtp]
+            S = St[jt, jtp]
+            prior_var = self.var_est[t - 1, jtp]
+            return (S / prior_var) * (R - np.dot(A, A.T) * Q)
+
+        return self._fill_updates(calc_update, (self.ndim, self.ndim))
+
+    def _fill_updates(self, func, shape):
+        total_shape = (self.nmodels, self.nmodels) + shape
+        result = nan_array(*total_shape)
         for jt in range(self.nmodels):
             for jtp in range(self.nmodels):
-                prior_obs_var = self.var_est[t - 1, jtp]
-                Qt = chain_dot(Ft.T, Rt[jt, jtp], Ft) + prior_obs_var
-                result[jt, jtp] = Qt
+                result[jt, jtp] = np.squeeze(func(jt, jtp))
 
         return result
 
-    def _update_ft(self, t, at):
-        Ft = self._get_Ft(t)
+    def _update_postprob(self, t, errs, Qt):
+        # degrees of freedom for T dist'n
+        dist = stats.t(self.df[t - 1])
+
+        # rQ = np.sqrt(Qt)
+        # pi = self.prior_model_prob
+        # prior = self.model_prob[t - 1]
+        # result = pi * prior * dist.pdf(errs / rQ) / rQ
+
+        def calc_update(jt, jtp):
+            rQ = np.sqrt(Qt[jt, jtp])
+
+            # W&H eq. 12.40
+            pi = self.prior_model_prob[jt]
+            prior = self.model_prob[t - 1, jtp]
+            return pi * prior * dist.pdf(errs[jt, jtp] / rQ) / rQ
+
+        result = self._fill_updates(calc_update, ())
+
+        # normalize
+        return result / result.sum()
+
+    def _collapse_var(self, St, post_prob, marginal_post):
         result = nan_array(self.nmodels)
-        for j in range(self.nmodels):
-            result[j] = np.dot(Ft.T, at[j])
+
+        # TODO: vectorize
+        for jt in range(self.nmodels):
+            prec = 0
+            for jtp in range(self.nmodels):
+                prec += post_prob[jt, jtp] / (St[jt, jtp] * marginal_post[jt])
+
+            result[jt] = 1 / prec
 
         return result
 
@@ -327,23 +413,11 @@ class MultiProcessDLM(object):
             # collapse scales
             for jtp in range(self.nmodels):
                 mdev = coll_m[jt] - mt[jt, jtp]
-                C += pstar[jtp] * (C[jt, jtp] + np.outer(mdev, mdev))
+                C += pstar[jtp] * (Ct[jt, jtp] + np.outer(mdev, mdev))
 
             coll_C[jt] = C
 
         return coll_m, coll_C
-
-    def _update_At(self, t):
-        At = np.dot(Rt, Ft) / Qt
-
-    def _update_mt(self, t):
-        mode[t] = a_t + np.dot(At, err)
-
-    def _update_St(self, t):
-        S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
-
-    def _update_Ct(self, t):
-        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
     def _get_Ft(self, t):
         return self.F[0:1].T
@@ -355,6 +429,7 @@ class Model(object):
     def __init__(self, G, deltas, obs_var_mult=1.):
         self.G = G
         self.deltas = np.asarray(deltas)
+        self.obs_var_mult = obs_var_mult
 
     def get_Wt(self, Cprior):
         # Eq. 12.18
@@ -363,7 +438,8 @@ class Model(object):
 
 if __name__ == '__main__':
     cp6 = datasets.table_111()
-    F = [[1]]
+
+    E2 = [[1, 0]]
 
     G = tools.jordan_form(2)
 
@@ -385,7 +461,7 @@ if __name__ == '__main__':
     C0 = np.diag([10000., 25.])
     n0, d0 = 10, 1440
 
-    multi = MultiProcessDLM(cp6, F, models, order,
+    multi = MultiProcessDLM(cp6, E2, models, order,
                             prior_model_prob,
                             mean_prior=(m0, C0),
                             var_prior=(n0, d0),
