@@ -40,12 +40,15 @@ def plot_support(f, hi, lo, thresh=1e-10, style='k', N=5000, ax=None):
     handle : result of plot function
     """
 
-    intervals = np.linspace(lo - 10 * np.abs(lo),
-                            hi + 10 * np.abs(hi), num=N)
+    intervals = np.linspace(lo - np.abs(lo), hi + np.abs(hi), num=N)
     pdfs = f(intervals)
 
     # try to find support
     above = (pdfs > thresh)
+
+    if not above.any():
+        raise Exception('Did not find any points exceeding support threshold')
+
     supp_l, supp_u = above.argmax(), (len(above) - above[::-1].argmax() - 1)
     xs = np.linspace(intervals[supp_l], intervals[supp_u], num=N)
 

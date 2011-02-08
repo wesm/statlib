@@ -3,7 +3,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 from statlib.tools import nan_array, chain_dot
-from statlib.dlm import st
+from statlib.dlm import ConstantDLM, st
 import statlib.tools as tools
 import statlib.plotting as plotting
 
@@ -72,7 +72,7 @@ class DLMMixture(object):
             scale = np.sqrt(model.mu_scale[t + 1, ix, ix])
             dists[name] = stats.t(df, loc=mode, scale=scale)
 
-        self._plot_mixture(dists, self.get_weights(t),
+        plot_mixture(dists, self.get_weights(t),
                            support_thresh=support_thresh)
 
     def plot_forc_density(self, t, support_thresh=0.1):
@@ -97,52 +97,38 @@ class DLMMixture(object):
             scale = np.sqrt(model.forc_var[t])
             dists[name] = stats.t(df, loc=mode, scale=scale)
 
-        self._plot_mixture(dists, self.get_weights(t),
-                           support_thresh=support_thresh)
+        plot_mixture(dists, self.get_weights(t),
+                     support_thresh=support_thresh)
 
-    def _plot_mixture(self, dists, weights, support_thresh=0.1):
-        """
-
-        """
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-
-        def mix_pdf(x):
-            tot = 0
-
-            for name, dist in dists.iteritems():
-                tot += weights[name] * dist.pdf(x)
-
-            return tot
-
-        # plot mixture
-        mix = plotting.plot_support(mix_pdf, -1, 1,
-                                    thresh=support_thresh,
-                                    style='k',
-                                    ax=ax)
-
-        for name in self.names:
-            comp = plotting.plot_support(dists[name].pdf, -1, 1,
-                                         thresh=support_thresh,
-                                         style='k--',
-                                         ax=ax)
-
-        ax.legend((mix, comp), ('Mixture', 'Component'))
-
-class ApproximateMixture(object):
+def plot_mixture(dists, weights, hi=1, lo=-1, support_thresh=0.1):
     """
-    Class II type DLM mixture model. A model is chosen at each time point
 
-    Parameters
-    ----------
-    models : dict
-
-    Notes
-    -----
-    cf. W&H Section 12.2
     """
-    def __init__(self):
-        pass
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    def mix_pdf(x):
+        tot = 0
+
+        for name, dist in dists.iteritems():
+            tot += weights[name] * dist.pdf(x)
+
+        return tot
+
+    # plot mixture
+    mix = plotting.plot_support(mix_pdf, hi, lo,
+                                thresh=support_thresh,
+                                style='k',
+                                ax=ax)
+
+    for _, dist in dists.iteritems():
+        comp = plotting.plot_support(dist.pdf, hi, lo,
+                                     thresh=support_thresh,
+                                     style='k--',
+                                     ax=ax)
+
+    ax.legend((mix, comp), ('Mixture', 'Component'))
+
 
 class MultiProcessDLM(object):
     """
@@ -193,7 +179,9 @@ class MultiProcessDLM(object):
         self.var_prior = var_prior
 
         # set up result storage for all the models
-        self.model_prob = nan_array(self.nobs + 1, self.nmodels)
+        self.marginal_prob = nan_array(self.nobs + 1, self.nmodels)
+        self.post_prob = nan_array(self.nobs + 1,
+                                   self.nmodels, self.nmodels)
 
         self.mu_mode = nan_array(self.nobs + 1, self.nmodels, self.ndim)
         self.mu_forc_mode = nan_array(self.nobs + 1, self.nmodels, self.ndim)
@@ -202,21 +190,22 @@ class MultiProcessDLM(object):
         self.mu_forc_var = nan_array(self.nobs + 1, self.nmodels, self.nmodels,
                                      self.ndim, self.ndim)
 
-        self.forecast = nan_array(self.nobs + 1, self.nmodels)
+        self.forecast = np.zeros((self.nobs + 1, self.nmodels))
 
-        # relative multiplier!
+        # set in initial values
+        self.marginal_prob[0] = self.prior_model_prob
+        self.mu_mode[0], self.mu_scale[0] = mean_prior
+
+        # observation variance stuff
+        n, d = var_prior
+        self.df = n + np.arange(self.nobs + 1) # precompute
         self.var_est = nan_array(self.nobs + 1, self.nmodels)
+        self.var_scale = nan_array(self.nobs + 1, self.nmodels)
+        self.var_est[0] = d / n
+        self.var_scale[0] = d
 
         # forecasts are computed via mixture for now
         self.forc_var = nan_array(self.nobs, self.nmodels, self.nmodels)
-
-        n, d = var_prior
-
-        # set in initial values
-        self.model_prob[0] = self.prior_model_prob
-        self.mu_mode[0], self.mu_scale[0] = mean_prior
-        self.var_est[0] = d / n
-        self.df = n + np.arange(self.nobs + 1) # precompute
 
         self._compute_parameters()
 
@@ -250,7 +239,11 @@ class MultiProcessDLM(object):
             ft = self._update_ft(Ft, at)
             errs = obs - ft
             mt = self._update_mt(at, At, errs)
-            St = self._update_St(t, Qt, errs)
+
+            # update scale, then compute scale / degrees of freedom
+            dt = self._update_dt(t, Qt, errs)
+            St = dt / self.df[t]
+
             Ct = self._update_Ct(t, Rt, Qt, At, St)
 
             # update posterior model probabilities
@@ -270,10 +263,15 @@ class MultiProcessDLM(object):
             coll_m, coll_C = self._collapse_params(pstar, mt, Ct)
 
             # store results
+            self.marginal_prob[t] = marginal_post
+            self.post_prob[t] = post_prob
+
             self.mu_mode[t] = coll_m
             self.mu_scale[t] = coll_C
-            self.var_est[t] = coll_St
             self.forc_var[t-1] = Qt
+
+            self.var_est[t] = coll_St
+            self.var_scale[t] = coll_St * self.df[t] # top of p. 469
 
             # both are same for each jt
             self.mu_forc_mode[t] = at[0]
@@ -333,21 +331,25 @@ class MultiProcessDLM(object):
 
         return self._fill_updates(calc_update, (self.ndim,))
 
-    def _update_St(self, t, Qt, errs):
+    def _update_dt(self, t, Qt, errs):
+        # W&H p. 468
         def calc_update(jt, jtp):
-            prior = self.var_est[t - 1, jtp]
-            Q = Qt[jt, jtp]
-            e = errs[jt, jtp]
-            return prior + (prior / self.df[t]) * ((e ** 2) / Q - 1)
+            prior = self.var_scale[t - 1, jtp]
+            prior_var = self.var_est[t - 1, jtp]
+
+            return prior + prior_var * errs[jt, jtp] ** 2 / Qt[jt, jtp]
 
         return self._fill_updates(calc_update, ())
 
     def _update_Ct(self, t, Rt, Qt, At, St):
         def calc_update(jt, jtp):
             R = Rt[jt, jtp]
-            A = At[jt, jtp]
             Q = Qt[jt, jtp]
             S = St[jt, jtp]
+
+            # need to make this a column vector
+            A = np.atleast_2d(At[jt, jtp]).T
+
             prior_var = self.var_est[t - 1, jtp]
             return (S / prior_var) * (R - np.dot(A, A.T) * Q)
 
@@ -368,7 +370,7 @@ class MultiProcessDLM(object):
 
         # rQ = np.sqrt(Qt)
         # pi = self.prior_model_prob
-        # prior = self.model_prob[t - 1]
+        # prior = self.marginal_prob[t - 1]
         # result = pi * prior * dist.pdf(errs / rQ) / rQ
 
         def calc_update(jt, jtp):
@@ -376,7 +378,7 @@ class MultiProcessDLM(object):
 
             # W&H eq. 12.40
             pi = self.prior_model_prob[jt]
-            prior = self.model_prob[t - 1, jtp]
+            prior = self.marginal_prob[t - 1, jtp]
             return pi * prior * dist.pdf(errs[jt, jtp] / rQ) / rQ
 
         result = self._fill_updates(calc_update, ())
@@ -422,6 +424,58 @@ class MultiProcessDLM(object):
     def _get_Ft(self, t):
         return self.F[0:1].T
 
+    def plot_mu_density(self, t, index=0, support_thresh=None):
+        ix = index
+        dists = {}
+        weights = {}
+
+        thresh = 0
+        for i in range(self.nmodels):
+            df = self.df[t]
+            mode = self.mu_mode[t + 1, i, ix]
+            scale = np.sqrt(self.mu_scale[t + 1, i, ix, ix])
+            dist = stats.t(df, loc=mode, scale=scale)
+            dists[i] = dist
+            weights[i] = self.marginal_prob[t + 1, i]
+
+            thresh = max(thresh, dist.pdf(mode))
+
+        if support_thresh is not None:
+            thresh = support_thresh
+        else:
+            # HACK
+            thresh /= 1000
+
+        plot_mixture(dists, weights,
+                     hi=self.mu_mode[:, :, ix].max(),
+                     lo=self.mu_mode[:, :, ix].min(),
+                     support_thresh=thresh)
+
+    def plot_forc_density(self, t, support_thresh=None):
+        dists = {}
+        weights = {}
+        thresh = 0
+        for i in range(self.nmodels):
+            for j in range(self.nmodels):
+                df = self.df[t]
+                mode = self.forecast[t, j]
+                scale = np.sqrt(self.forc_var[t, i, j])
+                dist = stats.t(df, loc=mode, scale=scale)
+                dists[i,j] = dist
+                weights[i,j] = self.post_prob[t, i, j]
+
+                thresh = max(thresh, dist.pdf(mode))
+
+        if support_thresh is not None:
+            thresh = support_thresh
+        else:
+            thresh /= 1000
+
+        plot_mixture(dists, weights,
+                     hi=self.forecast[t].max(),
+                     lo=self.forecast[t].min(),
+                     support_thresh=thresh)
+
 class Model(object):
     """
     Just a dummy for doing Section 12.4, for now
@@ -436,7 +490,7 @@ class Model(object):
         disc_var = np.diag(Cprior) * (1 / self.deltas - 1)
         return chain_dot(self.G, np.diag(disc_var), self.G.T)
 
-if __name__ == '__main__':
+def get_multi_model():
     cp6 = datasets.table_111()
 
     E2 = [[1, 0]]
@@ -451,20 +505,42 @@ if __name__ == '__main__':
 
     models = {}
 
-    models['standard'] = Model(G, [0.9, 0.9], obs_var_mult=1.)
+    standard = Model(G, [0.9, 0.9], obs_var_mult=1.)
+    models['standard'] = standard
     models['outlier'] = Model(G, [0.9, 0.9], obs_var_mult=100.)
     models['level'] = Model(G, [0.01, 0.9], obs_var_mult=1.)
     models['growth'] = Model(G, [0.9, 0.01], obs_var_mult=1.)
+
+    # models['standard'] = standard
+    # models['outlier'] = standard
+    # models['level'] = standard
+    # models['growth'] = standard
 
     # priors
     m0 = np.array([600., 10.])
     C0 = np.diag([10000., 25.])
     n0, d0 = 10, 1440
 
+    mean_prior = (m0, C0)
+    var_prior = (n0, d0)
+
+    # prior_model_prob = {'standard' : 0.25,
+    #                     'outlier' : 0.25,
+    #                     'level' : 0.25,
+    #                     'growth' : 0.25}
+
     multi = MultiProcessDLM(cp6, E2, models, order,
                             prior_model_prob,
-                            mean_prior=(m0, C0),
-                            var_prior=(n0, d0),
+                            mean_prior=mean_prior,
+                            var_prior=var_prior,
                             approx_steps=1)
 
+    comp = ConstantDLM(cp6, E2, G,
+                       mean_prior=mean_prior,
+                       var_prior=var_prior,
+                       discount=0.9)
 
+    return multi, comp
+
+if __name__ == '__main__':
+    multi, comp = get_multi_model()

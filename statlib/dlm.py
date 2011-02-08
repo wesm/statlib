@@ -125,25 +125,25 @@ class DLM(object):
             # derive innovation variance from discount factor
             if t > 1:
                 # only discount after first time step! hmm
-                a_t = np.dot(G, mode[t - 1])
+                at = np.dot(G, mode[t - 1])
                 Rt = chain_dot(G, C[t - 1], G.T) / self.disc
             else:
-                a_t = mode[0]
+                at = mode[0]
                 Rt = C[0]
 
             Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
             At = np.dot(Rt, Ft) / Qt
 
             # forecast theta as time t
-            f_t = np.dot(Ft.T, a_t)
-            err = obs - f_t
+            ft = np.dot(Ft.T, at)
+            err = obs - ft
 
             # update mean parameters
-            mode[t] = a_t + np.dot(At, err)
+            mode[t] = at + np.dot(At, err)
             S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
             C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
-            self.mu_forc_mode[t] = a_t
+            self.mu_forc_mode[t] = at
             self.forc_var[t-1] = Qt
             self.R[t] = Rt
 
