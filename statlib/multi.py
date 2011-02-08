@@ -210,20 +210,6 @@ class MultiProcessDLM(object):
         self._compute_parameters()
 
     def _compute_parameters(self):
-        """
-        Compute parameter estimates for Gaussian Univariate DLM
-
-        Parameters
-        ----------
-
-        Notes
-        -----
-        West & Harrison pp. 111-112
-
-        Returns
-        -------
-
-        """
         for i, obs in enumerate(self.y):
             Ft = self._get_Ft(i)
 
