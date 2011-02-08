@@ -467,34 +467,42 @@ class MultiProcessDLM(object):
                      support_thresh=thresh)
 
     def plot_post_prob(self):
-        fig, axes = plt.subplots(nrows=self.nmodels, sharex=True,
-                                 sharey=True)
+        _, axes = plt.subplots(nrows=self.nmodels, sharex=True,
+                               sharey=True)
 
         rng = np.arange(len(self.marginal_prob))
         for i in range(self.nmodels):
             ax = axes[i]
             ax.bar(rng, self.marginal_prob[:, i], color='k', width=0.5)
 
-    def plot_forecast(self):
+    def plot_forecast(self, pause=False):
         # Figure 12.5
 
         fig = plt.figure()
-        ax = fig.add_subplot(111)
 
-        rng = self.dates
-        ax.plot(self.dates, self.y, 'k')
+        ax = fig.add_subplot(111)
         forcs = self.forecast[1:]
         probs = self.marginal_prob[:-1]
 
-        for i in range(self.nmodels):
-            for j, d in enumerate(self.dates):
-                ax.plot([d], forcs[j, i], 'ko', ms=probs[j, i] * 6)
+        if not pause:
+            ax.plot(self.dates, self.y, 'k')
+        else:
+            ax.plot(self.dates, self.y, 'w')
+
+        fig.autofmt_xdate()
+
+        for i, d in enumerate(self.dates):
+            for j in range(self.nmodels):
+                ax.plot([d], forcs[i, j], 'ko', ms=probs[i, j] * 6)
+
+            if pause:
+                ax.plot(self.dates[:i+1], self.y[:i+1], 'k')
+                plt.draw_if_interactive()
+                raw_input('Press a key to continue')
 
         hlines = [11, 24, 36]
         for h in hlines:
             ax.axvline(self.dates[h], color='k')
-
-        fig.autofmt_xdate()
 
 class Model(object):
     """
@@ -509,58 +517,3 @@ class Model(object):
         # Eq. 12.18
         disc_var = np.diag(Cprior) * (1 / self.deltas - 1)
         return chain_dot(self.G, np.diag(disc_var), self.G.T)
-
-def get_multi_model():
-    cp6 = datasets.table_111()
-
-    E2 = [[1, 0]]
-
-    G = tools.jordan_form(2)
-
-    order = ['standard', 'outlier', 'level', 'growth']
-    prior_model_prob = {'standard' : 0.85,
-                        'outlier' : 0.07,
-                        'level' : 0.05,
-                        'growth' : 0.03}
-
-    models = {}
-
-    standard = Model(G, [0.9, 0.9], obs_var_mult=1.)
-    models['standard'] = standard
-    models['outlier'] = Model(G, [0.9, 0.9], obs_var_mult=100.)
-    models['level'] = Model(G, [0.01, 0.9], obs_var_mult=1.)
-    models['growth'] = Model(G, [0.9, 0.01], obs_var_mult=1.)
-
-    # models['standard'] = standard
-    # models['outlier'] = standard
-    # models['level'] = standard
-    # models['growth'] = standard
-
-    # priors
-    m0 = np.array([600., 10.])
-    C0 = np.diag([10000., 25.])
-    n0, d0 = 10, 1440
-
-    mean_prior = (m0, C0)
-    var_prior = (n0, d0)
-
-    # prior_model_prob = {'standard' : 0.25,
-    #                     'outlier' : 0.25,
-    #                     'level' : 0.25,
-    #                     'growth' : 0.25}
-
-    multi = MultiProcessDLM(cp6, E2, models, order,
-                            prior_model_prob,
-                            mean_prior=mean_prior,
-                            var_prior=var_prior,
-                            approx_steps=1)
-
-    comp = ConstantDLM(cp6, E2, G,
-                       mean_prior=mean_prior,
-                       var_prior=var_prior,
-                       discount=0.9)
-
-    return multi, comp
-
-if __name__ == '__main__':
-    multi, comp = get_multi_model()
