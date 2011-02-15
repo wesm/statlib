@@ -262,7 +262,6 @@ class MultiProcessDLM(object):
             # both are same for each jt
             self.mu_forc_mode[t] = at[0]
             self.forecast[t] = ft[0]
-
             self.mu_forc_var[t] = Rt
 
     def _update_at(self, t):
@@ -428,24 +427,41 @@ class MultiProcessDLM(object):
                      support_thresh=thresh)
 
     def plot_forc_density(self, t, support_thresh=None):
+        """
+        Plot mixture components of one-step forecast density
+
+        Parameters
+        ----------
+        t : int
+        support_thresh : float or None
+
+        Notes
+        -----
+        cf. Eq. 12.38 in W&H
+        """
         dists = {}
         weights = {}
         thresh = 0
-        for i in range(self.nmodels):
-            for j in range(self.nmodels):
-                df = self.df[t]
-                mode = self.forecast[t, j]
-                scale = np.sqrt(self.forc_var[t, i, j])
-                dist = stats.t(df, loc=mode, scale=scale)
-                dists[i,j] = dist
-                weights[i,j] = self.post_prob[t, i, j]
 
+        for jt in range(self.nmodels):
+            for jtp in range(self.nmodels):
+
+                mode = self.forecast[t, jtp]
+                scale = np.sqrt(self.forc_var[t - 1, jt, jtp])
+
+                dist = stats.t(self.df[t], loc=mode, scale=scale)
+
+                dists[jt, jtp] = dist
                 thresh = max(thresh, dist.pdf(mode))
 
         if support_thresh is not None:
             thresh = support_thresh
         else:
-            thresh /= 1000
+            thresh /= 100
+
+        # pi(j_t) p_{t-1}(j_{t-1})
+        weights = np.outer(self.prior_model_prob,
+                           self.marginal_prob[t - 1])
 
         plot_mixture(dists, weights,
                      hi=self.forecast[t].max(),
