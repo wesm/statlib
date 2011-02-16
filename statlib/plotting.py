@@ -7,7 +7,7 @@ import matplotlib as mpl
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 
-from scikits.statsmodels.tsa.stattools import acf
+from scikits.statsmodels.tsa.stattools import acf, pacf
 
 #-------------------------------------------------------------------------------
 # Graphing functions
@@ -130,11 +130,14 @@ def adorn_plot(title=None, ylabel=None, xlabel=None):
     plt.ylabel(ylabel, fontsize=16)
     plt.xlabel(xlabel, fontsize=16)
 
-def plot_acf(y, lags=100):
-    acf = acf(y, nlags=lags)
+def plot_acf(y, lags=100, partial=False):
+    if partial:
+        the_acf = pacf(y, nlags=lags)
+    else:
+        the_acf = acf(y, nlags=lags)
 
     plt.figure(figsize=(10, 5))
-    plt.vlines(np.arange(lags+1), [0], acf)
+    plt.vlines(np.arange(lags+1), [0], the_acf)
 
     plt.axhline(0, color='k')
 
@@ -163,3 +166,26 @@ def plot_acf_multiple(ys, lags=20):
         ax.set_xlim([-1, xs[-1] + 1])
 
     mpl.rcParams['font.size'] = old_size
+
+
+def plot_fourier_rep(vals, harmonic=None):
+    a, b = tools.fourier_coefs(vals)
+    theta = 2 * np.pi / len(vals)
+
+    p = len(vals)
+
+    if harmonic is None:
+        # plot all harmonics
+        def f(t):
+            angles = theta * np.arange(p // 2 + 1) * t
+            return (a * np.cos(angles)).sum() + (b * np.sin(angles)).sum()
+    else:
+        def f(t):
+            j = harmonic
+            angle = theta * j * t
+            return a[j] * np.cos(angle) + b[j] * np.sin(angle)
+
+    plotf(np.vectorize(f, [np.float64]), 0, len(vals) + 1)
+    plt.vlines(np.arange(p), 0, vals)
+    plt.axhline(0)
+

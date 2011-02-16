@@ -77,6 +77,11 @@ def foo():
 
     return pn.DataFrame(datad)
 
+def eeg_data():
+    data = open('westharrison/data/eeg.dat').read().strip()
+    data = re.sub('[\s\n]+', ' ', data).split()
+    return np.array(data, dtype=float)
+
 def parse_table_22():
     path = 'westharrison/data/Table2.2.data.txt'
     sep = '\s+'

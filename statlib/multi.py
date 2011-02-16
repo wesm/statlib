@@ -3,11 +3,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 from statlib.tools import nan_array, chain_dot
-from statlib.dlm import ConstantDLM, st
-import statlib.tools as tools
 import statlib.plotting as plotting
-
-import statlib.datasets as datasets
 from pandas import DataMatrix
 
 class DLMMixture(object):
