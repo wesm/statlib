@@ -495,8 +495,10 @@ class MultiProcessDLM(object):
 
             if pause:
                 ax.plot(self.dates[:i+1], self.y[:i+1], 'k')
-                plt.draw_if_interactive()
-                raw_input('Press a key to continue')
+                plt.draw()
+                key = raw_input('Press any key or q')
+                if key == 'q':
+                    return
 
         hlines = [11, 24, 36]
         for h in hlines:
