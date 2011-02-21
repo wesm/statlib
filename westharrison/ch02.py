@@ -8,7 +8,7 @@ import statlib.dlm as dlm
 reload(dlm)
 from statlib.dlm import DLM, ConstantDLM, st
 
-import datasets
+import statlib.datasets as datasets
 
 def ex_21():
     y = datasets.table_22()

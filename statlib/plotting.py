@@ -95,7 +95,6 @@ def plotf(f, xstart=0, xend=1, n=1000, style='b', axes=None, label=None):
         plt.plot(xs, ys, style, label=label)
 
     # plt.vlines(xs, [0], ys, lw=2)
-
     plt.xlim([xstart - 1, xend + 1])
 
 def plot_pdf(dist, **kwds):

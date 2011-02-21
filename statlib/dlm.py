@@ -20,6 +20,7 @@ from statlib.tools import chain_dot, nan_array
 from statlib.plotting import plotf
 import statlib.tools as tools
 import statlib.distributions as distm
+from pandas.util.testing import set_trace as st
 
 def nct_pdf(x, df, nc):
     from rpy2.robjects import r
