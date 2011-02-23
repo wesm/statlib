@@ -79,7 +79,8 @@ class ARModel(object):
         # convert to real
         H = H[sorter][mask].real
         # double the complex H coefficients, z_t,j = x_t,d + x_t,h
-        # negative components are at the beginning
+        # complex components are at the beginning because we set the real
+        # component angles to pi
         H[:(-mask).sum()] *= 2
 
         states = np.c_[np.zeros((p, p-1)),   # "initial states"
