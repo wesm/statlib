@@ -17,10 +17,10 @@ def density_plot(y, thresh=1e-10, style='k', ax=None):
     Make kernel density plot of input data
     """
     kde = stats.kde.gaussian_kde(y)
-    plot_support(kde.evaluate, y.max(), y.min(),
+    plot_support(kde.evaluate, y.min(), y.max(),
                  thresh=thresh, style=style, ax=ax)
 
-def plot_support(f, hi, lo, thresh=1e-10, style='k', N=5000, ax=None):
+def plot_support(f, lo, hi, thresh=1e-10, style='k', N=5000, ax=None):
     """
     Attempt to plot input function (e.g. a probability density) over its support
     (places where its value exceeds a certain threshold)

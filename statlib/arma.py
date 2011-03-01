@@ -6,12 +6,9 @@ import statlib.plotting as plotting
 
 from pandas.util.testing import set_trace as st
 
-import scipy.stats as stats
-
 from scikits.statsmodels.tsa.arima import ARMA as sm_arma
-from scikits.statsmodels.tsa.stattools import acf, acovf
+from scikits.statsmodels.tsa.stattools import acf
 from scikits.statsmodels.tools.decorators import cache_readonly
-from scikits.statsmodels.tools.tools import chain_dot as cdot
 
 import scikits.statsmodels.api as sm
 
@@ -92,8 +89,8 @@ class ARModel(object):
 
         return waves, mods, decomp
 
-    def plot_acf(self, lags=50):
-        plotting.plot_acf(self.data, lags)
+    def plot_acf(self, lags=50, partial=True):
+        plotting.plot_acf(self.data, lags, partial=partial)
 
 class TestARModel(object):
 
@@ -109,105 +106,6 @@ def _prep_arvars(x, p):
         X[i-1] = x[p-i:-i]
 
     return y, X.T
-
-class BayesLM(object):
-    """
-    Bayesian linear model with independent errors
-
-    Normal-InverseGamma prior
-
-    Parameters
-    ----------
-    Y : ndarray (length n)
-        response variable
-    X : ndarray (n x p)
-        independent variables
-    beta_prior : (mean, cov)
-        Prior for coefficients: Normal(mean, cov)
-    var_prior : (df, df * var_0)
-        Prior for error variance: InverseGamma(df /2, df * var_0 / 2)
-
-    Notes
-    -----
-    y = X'b + e
-    e ~ N(0, v * I_n)
-    b | v ~ N(m_0, v * C_0)
-    v ~ IG(n0 / 2, d0 / 2)
-    """
-    def __init__(self, Y, X, beta_prior, var_prior):
-        self.y = Y
-        self.x = X
-
-        self.nobs = len(Y)
-
-        self.m0, self.c0 = beta_prior
-        self.n0, self.d0 = var_prior
-
-    @cache_readonly
-    def beta_post_params(self):
-        X = self.x
-
-        Q = self.Q
-        Qinv = inv(Q)
-
-        A = cdot(self.c0, X.T, Qinv)
-
-        m = self.m0 + A.dot(self.prior_resid)
-        C = self.c0 - cdot(A, Q, A.T)
-
-        return m, C
-
-    @cache_readonly
-    def Q(self):
-        return cdot(X, self.c0, X.T) + np.eye(self.nobs)
-
-    @cache_readonly
-    def var_post_params(self):
-        post_n = self.nobs + self.n0
-
-        resid = self.prior_resid
-        post_d = np.dot(resid, LA.solve(self.Q, resid)) + self.d0
-
-        return post_n, post_d
-
-    @property
-    def precision_post_dist(self):
-        post_n, post_d = self.var_post_params
-        return stats.gamma(post_n, scale=2. / post_d)
-
-    @property
-    def var_post_dist(self):
-        post_n, post_d = self.var_post_params
-        return stats.invgamma(post_n, scale=post_d / 2.)
-
-    @cache_readonly
-    def prior_resid(self):
-        return self.y - np.dot(self.x, self.m0)
-
-    def sample(self, samples=1000):
-        """
-        Generate Monte Carlo samples of posterior distribution of parameters
-
-        Samples v, then b | v, with standard normal-inverse-gamma full
-        conditional distributions.
-
-        Parameters
-        ----------
-        samples : int
-        """
-        precision_samples = self.precision_post_dist.rvs(samples)
-        var_samples = 1 / precision_samples
-
-        # sample beta condition on v
-        beta_samples = []
-
-        m, C = self.beta_post_params
-
-        for v in var_samples:
-            rv = np.random.multivariate_normal(m, v * C)
-            beta_samples.append(rv)
-
-        return var_samples, np.array(beta_samples)
 
 def ma_coefs(coefs, maxn=10):
     p = len(coefs)
@@ -258,6 +156,7 @@ def ar_simulate(phi, s, n, dist='normal'):
     return out
 
 if __name__ == '__main__':
+    from statlib.linmod import BayesLM
     import statlib.datasets as ds
     eeg = ds.eeg_data()
 

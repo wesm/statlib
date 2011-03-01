@@ -125,6 +125,18 @@ def hpd_beta(y, n, h=.1, a=1, b=1, plot=False, **plot_kwds):
 
     return lt, ut, coverage, h
 
+def hpd_unimodal(dist, mode_guess=0., lo=0., hi=1e6, alpha=0.10):
+    # TODO: fix this to work with unimodal but not symmetric dist'n
+
+    mode = opt.fmin(lambda x: -dist.pdf(x), 0)[0]
+
+    lt = opt.bisect(lambda x: dist.pdf(x) / mode - alpha, lo, mode)
+    ut = opt.bisect(lambda x: dist.pdf(x) / mode - alpha, mode, hi)
+
+    coverage = dist.cdf(ut) - dist.cdf(lt)
+
+    return lt, ut, coverage
+
 #-------------------------------------------------------------------------------
 # MCMC utils
 

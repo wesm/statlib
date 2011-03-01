@@ -112,13 +112,13 @@ def plot_mixture(dists, weights, hi=1, lo=-1, support_thresh=0.1):
         return tot
 
     # plot mixture
-    mix = plotting.plot_support(mix_pdf, hi, lo,
+    mix = plotting.plot_support(mix_pdf, lo, hi,
                                 thresh=support_thresh,
                                 style='k',
                                 ax=ax)
 
     for _, dist in dists.iteritems():
-        comp = plotting.plot_support(dist.pdf, hi, lo,
+        comp = plotting.plot_support(dist.pdf, lo, hi,
                                      thresh=support_thresh,
                                      style='k--',
                                      ax=ax)
