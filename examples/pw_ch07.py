@@ -36,3 +36,7 @@ if __name__ == '__main__':
     plotting.plot_acf(sim)
 
     plt.show()
+
+    yenusd = np.loadtxt('statlib/data/japan-usa1000.txt', delimiter=',')
+    ukusd = np.loadtxt('statlib/data/uk-usa1000.txt', delimiter=',')
+b

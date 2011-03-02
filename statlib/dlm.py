@@ -22,6 +22,8 @@ import statlib.tools as tools
 import statlib.distributions as distm
 from pandas.util.testing import set_trace as st
 
+m_ = np.array
+
 def nct_pdf(x, df, nc):
     from rpy2.robjects import r
     dt = r.dt
@@ -52,7 +54,7 @@ class DLM(object):
     def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
                  discount=0.9):
         self.dates = y.index
-        self.y = np.array(y)
+        self.y = m_(y)
         self.nobs = len(y)
 
         if self.y.ndim == 1:
@@ -60,7 +62,7 @@ class DLM(object):
         else:
             raise Exception
 
-        F = np.array(F)
+        F = m_(F)
         if F.ndim == 1:
             F = F.reshape((len(F), 1))
         self.F = F
@@ -120,13 +122,10 @@ class DLM(object):
             t = i + 1
 
             # derive innovation variance from discount factor
-            if t > 1:
-                # only discount after first time step! hmm
-                at = np.dot(G, mode[t - 1])
-                Rt = chain_dot(G, C[t - 1], G.T) / self.disc
-            else:
-                at = mode[0]
-                Rt = C[0]
+
+            # only discount after first time step!
+            at = np.dot(G, mode[t - 1]) if t > 1 else mode[0]
+            Rt = chain_dot(G, C[t - 1], G.T) / self.disc if t > 1 else C[0]
 
             Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
             At = np.dot(Rt, Ft) / Qt
@@ -140,12 +139,43 @@ class DLM(object):
             S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
             C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
+
             self.mu_forc_mode[t] = at
             self.forc_var[t-1] = Qt
             self.R[t] = Rt
 
     def _get_Ft(self, t):
         return self.F[t:t+1].T
+
+    def backward_sample(self, steps=1):
+        """
+        Generate state sequence using distributions:
+
+        .. math:: p(\theta_{t-k} | D_t)
+        """
+        if steps != 1:
+            raise Exception('only do one step backward sampling for now...')
+
+        # Backward sample
+        mu = np.zeros((self.nobs + 1, self.ndim))
+
+        # initial values for smoothed dist'n
+        for t in xrange(T + 1):
+            if t == T:
+                # sample from posterior
+                fm = mode[-1]
+                fR = C[-1]
+            else:
+                # B_{t} = C_t G_t+1' R_t+1^-1
+                B = np.dot(C[t] * phi, la.inv(R[t+1:t+2]))
+
+                # smoothed mean
+                fm = mode[t] + np.dot(B, mode[t+1] - a[t+1])
+                fR = C[t] + chain_dot(B, C[t+1] - R[t+1], B.T)
+
+            mu[t] = dist.rmvnorm(fm, np.atleast_2d(fR))
+
+        return mu.squeeze()
 
     def plot_forc(self, alpha=0.10, ax=None):
         if ax is None:
