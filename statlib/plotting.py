@@ -12,15 +12,16 @@ from scikits.statsmodels.tsa.stattools import acf, pacf
 #-------------------------------------------------------------------------------
 # Graphing functions
 
-def density_plot(y, thresh=1e-10, style='k', ax=None):
+def density_plot(y, thresh=1e-10, style='k', ax=None, **plot_kwds):
     """
     Make kernel density plot of input data
     """
     kde = stats.kde.gaussian_kde(y)
     plot_support(kde.evaluate, y.min(), y.max(),
-                 thresh=thresh, style=style, ax=ax)
+                 thresh=thresh, style=style, ax=ax, **plot_kwds)
 
-def plot_support(f, lo, hi, thresh=1e-10, style='k', N=5000, ax=None):
+def plot_support(f, lo, hi, thresh=1e-10, style='k', N=5000, ax=None,
+                 **plot_kwds):
     """
     Attempt to plot input function (e.g. a probability density) over its support
     (places where its value exceeds a certain threshold)
@@ -55,7 +56,7 @@ def plot_support(f, lo, hi, thresh=1e-10, style='k', N=5000, ax=None):
     if ax is None:
         ax = plt.gca()
 
-    return ax.plot(xs, f(xs), style)
+    return ax.plot(xs, f(xs), style, **plot_kwds)
 
 def joint_contour(z_func, xlim=(0, 1), ylim=(0, 1), n=50,
                   ncontours=20):

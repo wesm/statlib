@@ -1,12 +1,15 @@
 from datetime import datetime
+import os
 import re
 
 import numpy as np
 import pandas as pn
 from pandas.io.parsers import parseCSV
 
+data_path = 'statlib/data'
+
 def table_33():
-    path = 'westharrison/data/Table3.3.data.txt'
+    path = os.path.join('Table3.3.data.txt')
     sep = '\s+'
 
     lines = [re.split(sep, l.strip()) for l in open(path)]
@@ -42,26 +45,26 @@ def table_22():
     """
     Gas consumption data
     """
-    path = 'westharrison/data/table22.csv'
+    path = os.path.join('table22.csv')
     return parseCSV(path, header=None)['B']
 
 def table_81():
     """
     Gas consumption data
     """
-    path = 'westharrison/data/table81.csv'
+    path = os.path.join('table81.csv')
     return parseCSV(path, header=None)['B']
 
 def table_102():
-    path = 'westharrison/data/table102.csv'
+    path = os.path.join('table102.csv')
     return parseCSV(path)
 
 def table_111():
-    path = 'westharrison/data/table111.csv'
+    path = os.path.join('table111.csv')
     return parseCSV(path)['CP6']
 
 def foo():
-    path = 'westharrison/data/Table11.1.data.txt'
+    path = os.path.join('Table11.1.data.txt')
     sep = '\s+'
 
     lines = [re.split(sep, l.strip()) for l in open(path)]
@@ -78,12 +81,12 @@ def foo():
     return pn.DataFrame(datad)
 
 def eeg_data():
-    data = open('westharrison/data/eeg.dat').read().strip()
+    data = open(os.path.join('eeg.dat')).read().strip()
     data = re.sub('[\s\n]+', ' ', data).split()
     return np.array(data, dtype=float)
 
 def parse_table_22():
-    path = 'westharrison/data/Table2.2.data.txt'
+    path = os.path.join('Table2.2.data.txt')
     sep = '\s+'
 
     lines = [re.split(sep, l.strip()) for l in open(path)]
@@ -98,4 +101,12 @@ def parse_table_22():
                          timeRule='EOM')
 
     return pn.Series(data, index=dates)
+
+def fx_gbpusd():
+    path = os.path.join(data_path, 'GBPUSD_FX.txt')
+    return np.loadtxt(path, delimiter=',')
+
+def fx_yenusd():
+    path = os.path.join(data_path, 'YENUSD_FX.txt')
+    return np.loadtxt(path, delimiter=',')
 

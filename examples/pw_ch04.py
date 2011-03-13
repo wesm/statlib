@@ -160,7 +160,7 @@ def mcmc(y, niter=1000, nburn=0, kappa=2, pi=0.9):
         if i >= 0:
             mus[i] = mu
             lams[i] = lam
-            vs[i] = vp
+            vs[i] = v
             ws[i] = w
             phis[i] = phi
 

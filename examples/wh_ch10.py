@@ -6,7 +6,9 @@ import matplotlib.pyplot as plt
 import statlib.dlm as dlm
 reload(dlm)
 from statlib.dlm import *
-import datasets
+from statlib.components import *
+from statlib.tools import *
+import statlib.datasets as datasets
 
 data = datasets.table_102()
 
