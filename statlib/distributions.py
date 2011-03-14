@@ -13,16 +13,16 @@ from scipy.stats import rv_continuous
 #-------------------------------------------------------------------------------
 # Distribution-related functions
 
-def tnorm(lower, upper, mean, sd):
+def rtrunc_norm(mean, sd, lower, upper, size=None):
     """
     Sample from a truncated normal distribution
 
     Parameters
     ----------
-    lower : float or array-like
-    upper : float or array-like
     mean : float or array_like
     sd : float or array_like
+    lower : float or array-like
+    upper : float or array-like
 
     Note
     ----
@@ -40,28 +40,31 @@ def tnorm(lower, upper, mean, sd):
     ulower = special.ndtr((lower - mean) / sd)
     uupper = special.ndtr((upper - mean) / sd)
 
-    if isinstance(ulower, np.ndarray):
-        n = len(ulower)
-        u = (uupper - ulower) * np.random.rand(n) + ulower
+    if size is None:
+        size = len(ulower) if isinstance(ulower, np.ndarray) else 1
     else:
-        u = (uupper - ulower) * np.random.rand() + ulower
+        raise ValueError('if array of bounds passed, size must be None')
 
+    u = (uupper - ulower) * np.random.rand(size) + ulower
     return mean + sd * special.ndtri(u)
 
 def rgamma(a, b, n=None):
+    """
+    Sample from gamma(a, b) distribution using rate parameterization. For
+    reducing cognitive dissonance moving between R and Python
+    """
     if n:
         return np.random.gamma(a, scale=1./b, size=n)
     else:
         return np.random.gamma(a, scale=1./b)
 
 rnorm = np.random.normal
-rtnorm = stats.truncnorm.rvs
 dnorm = stats.norm.pdf
+rtnorm = stats.truncnorm.rvs
+rmvnorm = np.random.multivariate_normal
 
 def make_t_ci(df, level, scale, alpha=0.10):
     sigma = stats.t(df).ppf(1 - alpha / 2)
     upper = level + sigma * scale
     lower = level - sigma * scale
     return lower, upper
-
-rmvnorm = np.random.multivariate_normal

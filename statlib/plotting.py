@@ -7,7 +7,6 @@ import matplotlib as mpl
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 
-from scikits.statsmodels.tsa.stattools import acf, pacf
 
 #-------------------------------------------------------------------------------
 # Graphing functions
@@ -131,6 +130,8 @@ def adorn_plot(title=None, ylabel=None, xlabel=None):
     plt.xlabel(xlabel, fontsize=16)
 
 def plot_acf(y, lags=100, partial=False):
+    from scikits.statsmodels.tsa.stattools import acf, pacf
+
     if partial:
         the_acf = pacf(y, nlags=lags)
     else:
@@ -145,6 +146,7 @@ def plot_acf_multiple(ys, lags=20):
     """
 
     """
+    from scikits.statsmodels.tsa.stattools import acf
     # hack
     old_size = mpl.rcParams['font.size']
     mpl.rcParams['font.size'] = 8
