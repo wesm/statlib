@@ -1,4 +1,6 @@
-from numpy cimport double_t, ndarray
+cimport cython
+
+from numpy cimport double_t, ndarray, import_array
 
 cimport numpy as cnp
 import numpy as np
@@ -12,14 +14,14 @@ def univ_sv_ffbs(ndarray[double_t, ndim=1] y,
                  double_t phi,
                  ndarray[double_t, ndim=1] v_mean,
                  ndarray[double_t, ndim=1] v_std,
-                 ndarray[double_t, ndim=1] lam,
-                 double_t w):
+                 ndarray[cnp.int32_t, ndim=1] lam,
+                 double_t v, double_t mu):
     '''
     Forward filter-backward sample for univariate SV model
     '''
 
     cdef:
-        ndarray[double_t, ndim=1] mode, a, C, R, draws
+        ndarray[double_t, ndim=1] mode, a, C, R, draws, mu_draws
         Py_ssize_t t = 0
         double_t at, At, Rt, Qt, ft, err, obs
         double_t B, fR, fm
@@ -44,18 +46,17 @@ def univ_sv_ffbs(ndarray[double_t, ndim=1] y,
         t = i + 1
 
         if t > 1:
-            at = phi * mode[t - 1]
-            Rt = phi * phi * C[t - 1] + w
+            at = phi * mode[t - 1] + mu * (1 - phi)
+            Rt = phi * phi * C[t - 1] + v
         else:
             at = mode[0]
             Rt = C[0]
 
-        Vt = lam[t - 1] * v
-        Qt = Rt + Vt
+        Qt = Rt + v_std[lam[i]]
         At = Rt / Qt
 
         # forecast theta as time t
-        ft = at
+        ft = at + v_mean[lam[i]]
         err = obs - ft
 
         # update mean parameters
@@ -65,7 +66,7 @@ def univ_sv_ffbs(ndarray[double_t, ndim=1] y,
         R[t] = Rt
 
     # Backward sample
-    mu = np.zeros(T + 1)
+    mu_draws = np.zeros(T + 1)
 
     # initial values for smoothed dist'n
     fR = C[-1]
@@ -82,9 +83,9 @@ def univ_sv_ffbs(ndarray[double_t, ndim=1] y,
             fm = mode[t] + B * (mode[t+1] - a[t+1])
             fR = C[t] + B * B * (C[t+1] - R[t+1])
 
-        mu[t] = fm + sqrt(fR) * draws[t]
+        mu_draws[t] = fm + sqrt(fR) * draws[t]
 
-    return mu
+    return mu_draws
 
 def _forward_filter():
     pass

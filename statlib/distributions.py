@@ -76,7 +76,6 @@ def rmvnorm(mu, cov, size=1):
     draws = np.random.randn(size, len(cov))
     return np.dot(draws, cov_sqrt) + mu
 
-
 # TODO arbitrary mixture...e.g. betas or gammas
 
 class NormalMixture(object):
@@ -120,3 +119,9 @@ class NormalMixture(object):
 
         plotting.plot_support(self.pdf, lo, hi, style=style,
                               **plot_kwds)
+
+if __name__ == '__main__':
+    sigma = np.array([[1, 2], [2, 4]], dtype=float)
+    mean = [0, 1]
+
+    x = rmvnorm(mean, sigma, size=10000)

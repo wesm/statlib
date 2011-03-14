@@ -4,6 +4,7 @@ Univariate stochastic volatility (SV) model
 from __future__ import division
 
 from numpy.random import rand
+import numpy.random as npr
 import numpy as np
 import scipy.stats as stats
 
@@ -46,15 +47,20 @@ class SVModel(object):
 
         self.nobs = len(data)
         self.data = data
+
+        self.y = np.log(data ** 2) / 2
+
         self.nu_approx = nu_approx
+
+        self.z, self.gamma, self.mu, self.phi, self.v = (None,) * 5
 
         # HACK
         self.phi_prior = 0.5, 0.1
         self.mu_prior = 0, 1
-        self.v_prior = 1
+        self.v_prior = 1, 1 # a, v_0
 
     def sample(self, niter=1000, nburn=0, thin=1):
-        self._setup_storage(niter, nburn, thin)
+        self._setup_storage(niter, thin)
 
         # mixture component selected
         gamma = np.zeros(self.nobs)
@@ -69,9 +75,9 @@ class SVModel(object):
 
             gamma = self._sample_gamma(z)
             phi = self._sample_phi(phi, z, mu, v)
-            mu = self._sample_mu()
-            v = self._sample_v()
-            z = self._sample_z(gamma, phi, v)
+            mu = self._sample_mu(z, phi, v)
+            v = self._sample_v(z, mu, phi)
+            z = self._sample_z(gamma, phi, v, mu)
 
             if i % thin == 0 and i >= 0:
                 k = i // thin
@@ -81,20 +87,22 @@ class SVModel(object):
                 self.v[k] = v
                 self.z[k] = z
 
-    def _setup_storage(self, niter, nburn, thin):
+            print 'phi: %10.6f mu: %10.6f v: %10.6f' % (phi, mu, v)
+
+    def _setup_storage(self, niter, thin):
         nresults = niter // thin
 
         self.z = np.zeros((nresults, self.nobs + 1))
-        self.gamma = np.zeros((nresults, self.nobs + 1))
+        self.gamma = np.zeros((nresults, self.nobs))
 
         self.mu = np.zeros(nresults)
         self.phi = np.zeros(nresults)
-        self.v = np.zeros(self.nobs + 1)
+        self.v = np.zeros(nresults)
 
     def _sample_gamma(self, z):
         mix = self.nu_approx
 
-        probs = np.empty((len(self.mix.weights), self.nobs))
+        probs = np.empty((len(mix.weights), self.nobs))
 
         i = 0
         for q, m, w in zip(mix.weights, mix.means, mix.variances):
@@ -103,10 +111,7 @@ class SVModel(object):
 
         # bleh, super slow
         probs /= probs.sum(0)
-        gamma = np.empty(self.nobs)
-        for i, p in enumerate(probs.T):
-            gamma[i] = sample_measure(p)
-        return gamma
+        return np.apply_along_axis(sample_measure, 0, probs).astype(np.int32)
 
     def _sample_phi(self, phi, z, mu, v):
         """
@@ -128,8 +133,8 @@ class SVModel(object):
         phistar = dist.rtrunc_norm(prop_mean, np.sqrt(1 / prop_prec), 0, 1)
 
         def accept_factor(phi):
-            return (np.sqrt(1 - phistar**2) *
-                    np.exp(0.5 * phistar**2 * (z[0] - mu)**2 / v))
+            return (np.sqrt(1 - phi**2) *
+                    np.exp(0.5 * phi**2 * (z[0] - mu)**2 / v))
 
         if rand() < accept_factor(phistar) / accept_factor(phi):
             return phistar
@@ -137,17 +142,46 @@ class SVModel(object):
             return phi
 
     def _sample_mu(self, z, phi, v):
-        pass
+        r"""
+        .. math::
+
+            p(\mu | ...) \propto p(\mu) N(z_0 | \mu, v / (1 - \phi^2)
+                                 \prod N(z_t | \mu + \phi(z_{t-1} - \mu), v)
+        """
+        prior_m, prior_var = self.mu_prior
+
+        # From N(z0 | mu, v / (1 - phi^2))
+        p2 = (1 - phi**2) / v
+        m2 = z[0]
+
+        # From Prod N(z_t | mu + phi(z_t-1 - mu), v)
+        p3 = self.nobs * (1 - phi) ** 2 / v
+        m3 = (z[1:] - phi * z[:-1]).mean() / (1 - phi)
+
+        # full conditional mean and precision
+        fc_prec = 1 / prior_var + p2 + p3
+        fc_mean = (prior_m / prior_var + m2 * p2 + m3 * p3) / fc_prec
+
+        return np.random.normal(fc_mean, np.sqrt(1 / fc_prec))
 
     def _sample_v(self, z, mu, phi):
-        pass
+        r"""
 
-    def _sample_z(self, gamma, phi, v):
+        """
+        a_prior, v0 = self.v_prior
+
+        fc_a = (a_prior + self.nobs + 1.) / 2
+        fc_b = (a_prior * v0 + (1 - phi**2) * (z[0] - mu)**2
+                + ((z[1:] - mu - phi * (z[:-1] - mu)) ** 2).sum()) / 2
+
+        return 1 / npr.gamma(fc_a, scale=1 / fc_b)
+
+    def _sample_z(self, gamma, phi, v, mu):
         # FFBS in Cython
         mu = ffbs.univ_sv_ffbs(self.y, phi,
                                self.nu_approx.means,
                                self.nu_approx.variances,
-                               gamma, v)
+                               gamma, v, mu)
 
         return mu
 
@@ -181,3 +215,6 @@ if __name__ == '__main__':
     data = ds.fx_gbpusd()
 
     mixture = get_log_chi2_normal_mix()
+
+    model = SVModel(data)
+    model.sample(100)
