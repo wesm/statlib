@@ -55,18 +55,18 @@ class SVModel(object):
         self.z, self.gamma, self.mu, self.phi, self.v = (None,) * 5
 
         # HACK
-        self.phi_prior = 0.5, 0.1
+        self.phi_prior = 1, 0.01
         self.mu_prior = 0, 1
-        self.v_prior = 1, 1 # a, v_0
+        self.v_prior = self.nobs, 0.002 # a, v_0
 
-    def sample(self, niter=1000, nburn=0, thin=1):
+    def sample(self, niter=1000, nburn=0, thin=1, debug=False):
         self._setup_storage(niter, thin)
 
         # mixture component selected
         gamma = np.zeros(self.nobs)
         mu = 0
         phi = 0.9
-        v = 1
+        v = 0.002
         z = np.zeros(self.nobs + 1) # volatility sequence
 
         for i in range(-nburn, niter):
@@ -87,13 +87,14 @@ class SVModel(object):
                 self.v[k] = v
                 self.z[k] = z
 
-            print 'phi: %10.6f mu: %10.6f v: %10.6f' % (phi, mu, v)
+            if debug:
+                print 'phi: %10.6f mu: %10.6f v: %10.6f' % (phi, mu, v)
 
     def _setup_storage(self, niter, thin):
         nresults = niter // thin
 
         self.z = np.zeros((nresults, self.nobs + 1))
-        self.gamma = np.zeros((nresults, self.nobs))
+        self.gamma = np.zeros((nresults, self.nobs), dtype=int)
 
         self.mu = np.zeros(nresults)
         self.phi = np.zeros(nresults)
@@ -111,7 +112,10 @@ class SVModel(object):
 
         # bleh, super slow
         probs /= probs.sum(0)
-        return np.apply_along_axis(sample_measure, 0, probs).astype(np.int32)
+
+        return ffbs.sample_discrete(probs.T)
+
+        # return np.apply_along_axis(sample_measure, 0, probs)
 
     def _sample_phi(self, phi, z, mu, v):
         """
@@ -125,18 +129,18 @@ class SVModel(object):
         sumsq = (r[:-1] ** 2).sum()
 
         css_mean = (r[1:] * r[:-1]).sum() / sumsq
-        css_var = v * sumsq
+        css_var = v / sumsq
 
-        prop_prec = 1 / css_var + 1 / prior_v
-        prop_mean = (css_mean / css_var + prior_m / prior_v) / prop_prec
+        prop_var = 1 / (1 / css_var + 1 / prior_v)
+        prop_mean = (css_mean / css_var + prior_m / prior_v) * prop_var
 
-        phistar = dist.rtrunc_norm(prop_mean, np.sqrt(1 / prop_prec), 0, 1)
+        phistar = dist.rtrunc_norm(prop_mean, np.sqrt(prop_var), 0, 1)
 
-        def accept_factor(phi):
-            return (np.sqrt(1 - phi**2) *
-                    np.exp(0.5 * phi**2 * (z[0] - mu)**2 / v))
+        def ln_accept_factor(phi):
+            return (0.5 * np.log(1 - phi ** 2) +
+                    0.5 * phi ** 2 * (z[0] - mu)**2 / v)
 
-        if rand() < accept_factor(phistar) / accept_factor(phi):
+        if np.log(rand()) < ln_accept_factor(phistar) - ln_accept_factor(phi):
             return phistar
         else:
             return phi
@@ -177,13 +181,28 @@ class SVModel(object):
         return 1 / npr.gamma(fc_a, scale=1 / fc_b)
 
     def _sample_z(self, gamma, phi, v, mu):
-        # FFBS in Cython
-        mu = ffbs.univ_sv_ffbs(self.y, phi,
-                               self.nu_approx.means,
-                               self.nu_approx.variances,
-                               gamma, v, mu)
 
-        return mu
+        Y = self.y - self.nu_approx.means[gamma] - mu
+        F = np.ones(self.nobs)
+        G = F * phi
+        V = self.nu_approx.variances[gamma]
+        W = v
+        m0 = - mu
+        C0 = v / (1 - phi ** 2)
+
+        # FFBS in Cython
+        return ffbs.univ_ffbs(Y, F, G, V, W, m0, C0) + mu
+
+    def plot_z(self):
+        plt.figure()
+
+        vol = np.exp(self.z)
+        for i in range(50):
+            k = np.random.randint(len(vol))
+            plt.plot(vol[k], '0.5')
+
+        plt.plot(vol.mean(0), 'k')
+
 
 def sample_measure(weights):
     return weights.cumsum().searchsorted(rand())
@@ -210,11 +229,13 @@ def get_log_chi2_normal_mix():
     return dist.NormalMixture(means, variances, weights)
 
 if __name__ == '__main__':
+    np.random.seed(1)
     import statlib.datasets as ds
 
     data = ds.fx_gbpusd()
+    data = ds.fx_yenusd()
 
     mixture = get_log_chi2_normal_mix()
 
     model = SVModel(data)
-    model.sample(100)
+    model.sample(1000, nburn=500)

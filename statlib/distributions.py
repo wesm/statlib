@@ -37,11 +37,14 @@ def rtrunc_norm(mean, sd, lower, upper, size=None):
     uupper = special.ndtr((upper - mean) / sd)
 
     if size is None:
-        size = len(ulower) if isinstance(ulower, np.ndarray) else 1
+        if isinstance(ulower, np.ndarray):
+            draws = np.random.rand(len(ulower))
+        else:
+            draws = np.random.rand()
     else:
         raise ValueError('if array of bounds passed, size must be None')
 
-    u = (uupper - ulower) * np.random.rand(size) + ulower
+    u = (uupper - ulower) * draws + ulower
     return mean + sd * special.ndtri(u)
 
 def rgamma(a, b, n=None):
