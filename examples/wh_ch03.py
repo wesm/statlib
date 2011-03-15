@@ -4,7 +4,7 @@ import statlib.dlm as dlm
 reload(dlm)
 from statlib.dlm import DLM
 
-import datasets
+import statlib.datasets as datasets
 
 def ex_310():
     y, x = datasets.table_33()
@@ -65,5 +65,7 @@ if __name__ == '__main__':
     mean_prior = (0.45, 0.0025)
     var_prior = (1, 1)
 
-    model = DLM(y, x, mean_prior=mean_prior,
-                var_prior=var_prior, discount=0.7)
+    model = dlm.DLM(y, x, mean_prior=mean_prior,
+                    var_prior=var_prior, discount=0.7)
+    model2 = dlm.DLM2(y, x, mean_prior=mean_prior,
+                      var_prior=var_prior, discount=0.7)

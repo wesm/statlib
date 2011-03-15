@@ -50,6 +50,7 @@ class DLM(object):
     discount : float
         Wt = Ct * (1 - d) / d
     """
+    F = None
 
     def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
                  discount=0.9):
@@ -65,9 +66,10 @@ class DLM(object):
         F = m_(F)
         if F.ndim == 1:
             F = F.reshape((len(F), 1))
-        self.F = F
+        self.ndim = F.shape[1]
 
-        self.ndim = self.F.shape[1]
+        # constant DLM handling
+        self._set_F(F)
 
         if G is None:
             G = np.eye(self.ndim)
@@ -91,6 +93,9 @@ class DLM(object):
         self.var_est[0] = d / n
 
         self._compute_parameters()
+
+    def _set_F(self, F):
+        self.F = F
 
     def _compute_parameters(self):
         """
@@ -128,6 +133,7 @@ class DLM(object):
             Rt = chain_dot(G, C[t - 1], G.T) / self.disc if t > 1 else C[0]
 
             Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
+
             At = np.dot(Rt, Ft) / Qt
 
             # forecast theta as time t
@@ -304,11 +310,41 @@ class DLM(object):
     def fit(self, discount=0.9):
         pass
 
+class DLM2(DLM):
+
+    def _compute_parameters(self):
+        df0, df0v0 = self.var_prior
+        v0 = float(df0v0) / df0
+
+        m0, C0 = self.mean_prior
+
+        (mode, a, Q, C, S) = _filter_cython(self.y, self.F, self.G,
+                                            self.disc, df0, v0, m0, C0)
+
+        self.forc_var = Q
+        self.mu_forc_mode = a
+        self.mu_mode = mode
+        self.mu_scale = C
+        self.var_est = S
+
 class ConstantDLM(DLM):
     """
 
     """
+    def _set_F(self, F):
+        self.F = np.ones((self.nobs, self.ndim)) * F
 
-    def _get_Ft(self, t):
-        return self.F[0:1].T
+class ConstantDLM2(DLM2):
+    def _set_F(self, F):
+        self.F = np.ones((self.nobs, self.ndim)) * F
 
+def _filter_cython(Y, F, G, delta, df0, v0, m0, C0):
+    import statlib.ffbs as ffbs
+
+    (mode, a, Q, C, S) = ffbs.udlm_filter_disc(Y, np.asarray(F, order='C'),
+                                               G, delta,
+                                               df0, v0,
+                                               np.asarray(m0, dtype=float),
+                                               np.asarray(C0, dtype=float))
+
+    return mode, a, Q, C, S

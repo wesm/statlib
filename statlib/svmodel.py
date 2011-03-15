@@ -105,12 +105,12 @@ class SVModel(object):
 
         probs = np.empty((len(mix.weights), self.nobs))
 
+        # bleh, slowest part in the whole code
         i = 0
         for q, m, w in zip(mix.weights, mix.means, mix.variances):
             probs[i] = q * np.exp(-0.5*(self.y-m-z[1:])**2 / w) / np.sqrt(w)
             i += 1
 
-        # bleh, super slow
         probs /= probs.sum(0)
 
         return ffbs.sample_discrete(probs.T)
@@ -232,10 +232,11 @@ if __name__ == '__main__':
     np.random.seed(1)
     import statlib.datasets as ds
 
-    data = ds.fx_gbpusd()
-    data = ds.fx_yenusd()
 
     mixture = get_log_chi2_normal_mix()
+
+    data = ds.fx_gbpusd()
+    data = ds.fx_yenusd()
 
     model = SVModel(data)
     model.sample(1000, nburn=500)

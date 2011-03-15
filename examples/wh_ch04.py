@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import statlib.dlm as dlm
 reload(dlm)
 from statlib.dlm import DLM, st
-import datasets
+import statlib.datasets as datasets
 
 lam = 1.
 phis = np.arange(0.95, 1.05, .001)
@@ -16,6 +16,8 @@ X = np.vstack((np.ones(len(x)),x )).T
 mean_prior = ([0, 0.45], [[0.005, 0],
                           [0, 0.0025]])
 var_prior = (1, 1)
+
+G = np.diag([lam, phis[0]])
 
 like = []
 for phi in phis:
@@ -36,3 +38,6 @@ ax1.plot(phis, lr, label='LR')
 ax2 = fig.add_subplot(212)
 ax2.plot(phis, llr, label='LogLR')
 plt.show()
+
+model = dlm.DLM(y, X, G=G, mean_prior=mean_prior,
+                var_prior=var_prior, discount=disc)
