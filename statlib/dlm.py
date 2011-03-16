@@ -51,6 +51,12 @@ class DLM(object):
         Wt = Ct * (1 - d) / d
     """
     F = None
+    mu_mode = None # mt
+    mu_scale = None # Ct
+    mu_forc_mode = None # at
+    var_est = None # St
+    forc_var = None # Qt
+    R = None # Rt
 
     def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
                  discount=0.9):
@@ -80,17 +86,12 @@ class DLM(object):
         self.var_prior = var_prior
         self.disc = discount
 
-        self.mu_mode = nan_array(self.nobs + 1, self.ndim)
-        self.mu_forc_mode = nan_array(self.nobs + 1, self.ndim)
-        self.mu_scale = nan_array(self.nobs + 1, self.ndim, self.ndim)
-        self.var_est = nan_array(self.nobs + 1)
-        self.forc_var = nan_array(self.nobs)
-        self.R = nan_array(self.nobs + 1, self.ndim, self.ndim)
+        df0, df0v0 = var_prior
+        self.df = df0 + np.arange(self.nobs + 1) # precompute
 
-        self.mu_mode[0], self.mu_scale[0] = mean_prior
-        n, d = var_prior
-        self.df = n + np.arange(self.nobs + 1) # precompute
-        self.var_est[0] = d / n
+        self.m0, self.C0 = mean_prior
+        self.df0 = df0
+        self.v0 = df0v0 / df0
 
         self._compute_parameters()
 
@@ -112,46 +113,13 @@ class DLM(object):
         -------
 
         """
-        # allocate result arrays
-        mode = self.mu_mode
-        C = self.mu_scale
-        df = self.df
-        S = self.var_est
-        G = self.G
-
-        for i, obs in enumerate(self.y):
-            # column vector, for W&H notational consistency
-            Ft = self._get_Ft(i)
-
-            # advance index: y_1 through y_nobs, 0 is prior
-            t = i + 1
-
-            # derive innovation variance from discount factor
-
-            # only discount after first time step!
-            at = np.dot(G, mode[t - 1]) if t > 1 else mode[0]
-            Rt = chain_dot(G, C[t - 1], G.T) / self.disc if t > 1 else C[0]
-
-            Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
-
-            At = np.dot(Rt, Ft) / Qt
-
-            # forecast theta as time t
-            ft = np.dot(Ft.T, at)
-            err = obs - ft
-
-            # update mean parameters
-            mode[t] = at + np.dot(At, err)
-            S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
-            C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
-
-
-            self.mu_forc_mode[t] = at
-            self.forc_var[t-1] = Qt
-            self.R[t] = Rt
-
-    def _get_Ft(self, t):
-        return self.F[t:t+1].T
+        (self.mu_mode,
+         self.mu_forc_mode,
+         self.mu_scale,
+         self.var_est,
+         self.forc_var,
+         self.R) = _filter_python(self.y, self.F, self.G, self.disc,
+                                  self.df0, self.v0, self.m0, self.C0)
 
     def backward_sample(self, steps=1):
         """
@@ -166,7 +134,7 @@ class DLM(object):
         mu = np.zeros((self.nobs + 1, self.ndim))
 
         # initial values for smoothed dist'n
-        for t in xrange(T + 1):
+        for t in xrange(T, -1, -1):
             if t == T:
                 # sample from posterior
                 fm = mode[-1]
@@ -310,6 +278,13 @@ class DLM(object):
     def fit(self, discount=0.9):
         pass
 
+class ConstantDLM(DLM):
+    """
+
+    """
+    def _set_F(self, F):
+        self.F = np.ones((self.nobs, self.ndim)) * F
+
 class DLM2(DLM):
 
     def _compute_parameters(self):
@@ -327,16 +302,134 @@ class DLM2(DLM):
         self.mu_scale = C
         self.var_est = S
 
-class ConstantDLM(DLM):
-    """
-
-    """
-    def _set_F(self, F):
-        self.F = np.ones((self.nobs, self.ndim)) * F
-
 class ConstantDLM2(DLM2):
     def _set_F(self, F):
         self.F = np.ones((self.nobs, self.ndim)) * F
+
+class MVDLM(object):
+    """
+    Multivariate DLM with matrix normal inverse Wishart prior
+
+    (Theta_0, Sigma) ~ NIW(M, c, n, D)
+    Theta_0 | Sigma ~ N(M, c * Sigma)
+    Sigma ~ IW(n, D)
+    """
+
+    def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
+                 discount=0.9):
+        pass
+
+
+
+def _mvfilter_python(Y, F, G, delta, df0, v0, m0, C0):
+    """
+    Univariate DLM update equations
+    """
+
+    nobs = len(Y)
+    ndim = len(G)
+
+    mode = nan_array(nobs + 1, ndim)
+    a = nan_array(nobs + 1, ndim)
+    C = nan_array(nobs + 1, ndim, ndim)
+    R = nan_array(nobs + 1, ndim, ndim)
+
+    # variance multiplier term
+    Q = nan_array(nobs)
+
+    # scale matrix
+    D = nan_array(nobs + 1, ndim, ndim)
+
+    # covariance estimate D / n
+    S = nan_array(nobs + 1, ndim, ndim)
+
+
+    mode[0] = m0
+    C[0] = C0
+
+    df = df0 + np.arange(nobs + 1) # precompute
+    S[0] = v0
+
+    # allocate result arrays
+    for i, obs in enumerate(Y):
+        # column vector, for W&H notational consistency
+        Ft = F[i]
+
+        # advance index: y_1 through y_nobs, 0 is prior
+        t = i + 1
+
+        # derive innovation variance from discount factor
+        # only discount after first time step!
+        at = np.dot(G, mode[t - 1]) if t > 1 else mode[0]
+        Rt = chain_dot(G, C[t - 1], G.T) / delta if t > 1 else C[0]
+        Qt = chain_dot(Ft, Rt, Ft) + S[t-1]
+        At = np.dot(Rt, Ft) / Qt
+
+        # forecast theta as time t
+        ft = np.dot(Ft, at)
+        err = obs - ft
+
+        # update mean parameters
+        mode[t] = at + np.dot(At, err)
+        S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
+        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
+
+        a[t] = at
+        Q[t-1] = Qt
+        R[t] = Rt
+
+    return mode, a, C, S, Q, R
+
+def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
+    """
+    Univariate DLM update equations
+    """
+
+    nobs = len(Y)
+    ndim = len(G)
+
+    mode = nan_array(nobs + 1, ndim)
+    a = nan_array(nobs + 1, ndim)
+    C = nan_array(nobs + 1, ndim, ndim)
+    S = nan_array(nobs + 1)
+    Q = nan_array(nobs)
+    R = nan_array(nobs + 1, ndim, ndim)
+
+    mode[0] = m0
+    C[0] = C0
+
+    df = df0 + np.arange(nobs + 1) # precompute
+    S[0] = v0
+
+    # allocate result arrays
+    for i, obs in enumerate(Y):
+        # column vector, for W&H notational consistency
+        Ft = F[i]
+
+        # advance index: y_1 through y_nobs, 0 is prior
+        t = i + 1
+
+        # derive innovation variance from discount factor
+        # only discount after first time step!
+        at = np.dot(G, mode[t - 1]) if t > 1 else mode[0]
+        Rt = chain_dot(G, C[t - 1], G.T) / delta if t > 1 else C[0]
+        Qt = chain_dot(Ft, Rt, Ft) + S[t-1]
+        At = np.dot(Rt, Ft) / Qt
+
+        # forecast theta as time t
+        ft = np.dot(Ft, at)
+        err = obs - ft
+
+        # update mean parameters
+        mode[t] = at + np.dot(At, err)
+        S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
+        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
+
+        a[t] = at
+        Q[t-1] = Qt
+        R[t] = Rt
+
+    return mode, a, C, S, Q, R
 
 def _filter_cython(Y, F, G, delta, df0, v0, m0, C0):
     import statlib.ffbs as ffbs

@@ -66,6 +66,4 @@ if __name__ == '__main__':
     var_prior = (1, 1)
 
     model = dlm.DLM(y, x, mean_prior=mean_prior,
-                    var_prior=var_prior, discount=0.7)
-    model2 = dlm.DLM2(y, x, mean_prior=mean_prior,
-                      var_prior=var_prior, discount=0.7)
+                    var_prior=var_prior, discount=0.6)

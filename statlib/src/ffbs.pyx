@@ -96,7 +96,7 @@ def univ_ffbs(ndarray[double_t, ndim=1] Y, # data
 
 def udlm_filter_disc(ndarray[double_t, ndim=1] Y, # data
                      ndarray[double_t, ndim=2] F,
-                     ndarray[double_t, ndim=2] G, # system matrix
+                     ndarray[double_t, ndim=2, mode='c'] G, # system matrix
                      double_t delta,
                      int32_t df0,
                      double_t v0,  #
