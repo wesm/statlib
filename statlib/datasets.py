@@ -110,3 +110,16 @@ def fx_yenusd():
     path = os.path.join(data_path, 'YENUSD_FX.txt')
     return np.loadtxt(path, delimiter=',')
 
+_rates_cols = ['AUD', 'BEF', 'CAD', 'FRF', 'DEM', 'JPY',
+               'NLG', 'NZD', 'ESP', 'SEK', 'CHF', 'GBP']
+_start_date = datetime(1986, 10, 1)
+
+def fx_rates_spot():
+    path = os.path.join(data_path, 'spot_exrates.dat')
+
+    data = np.loadtxt(path)
+
+    return pn.DataMatrix(data,
+                         index=pn.DateRange(_start_date, periods=len(data)),
+                         columns=_rates_cols)
+
