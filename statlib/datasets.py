@@ -116,10 +116,13 @@ _start_date = datetime(1986, 10, 1)
 
 def fx_rates_spot():
     path = os.path.join(data_path, 'spot_exrates.dat')
-
     data = np.loadtxt(path)
+    index = pn.DateRange(_start_date, periods=len(data))
+    return pn.DataMatrix(data, index=index, columns=_rates_cols)
 
-    return pn.DataMatrix(data,
-                         index=pn.DateRange(_start_date, periods=len(data)),
-                         columns=_rates_cols)
+def fx_rates_returns():
+    path = os.path.join(data_path, 'returns_exrates.dat')
+    data = np.loadtxt(path)
+    index = pn.DateRange(_start_date, periods=len(data))
+    return pn.DataMatrix(data, index=index, columns=_rates_cols)
 

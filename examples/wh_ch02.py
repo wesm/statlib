@@ -6,7 +6,7 @@ from statlib.tools import quantile
 
 import statlib.dlm as dlm
 reload(dlm)
-from statlib.dlm import DLM, ConstantDLM, st
+from statlib.dlm import DLM, st
 
 import statlib.datasets as datasets
 
@@ -108,16 +108,16 @@ def boot_ci(sample, samples=10000):
 
 if __name__ == '__main__':
     y = datasets.table_22()
-    x = [[1]]
+    x = [1]
 
     mean_prior = (0, 1)
     var_prior = (1, 0.01)
 
-    model3 = ConstantDLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
+    model3 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
                  discount=0.1)
 
-    model = ConstantDLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                        discount=.9)
-    model2 = ConstantDLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                         discount=0.9)
+    model = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
+                discount=.9)
+    model2 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
+                 discount=0.9)
 

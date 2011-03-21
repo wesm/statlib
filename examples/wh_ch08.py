@@ -15,5 +15,5 @@ model = Polynomial(2) + FullEffectsFourier(12, harmonics=[1, 4])
 # model = Polynomial(1) + FullEffectsFourier(12)
 k = model.F.shape[1]
 mean_prior = (np.zeros(k), np.eye(k))
-dlm = ConstantDLM(gas, model.F, G=model.G, mean_prior=mean_prior,
-                  var_prior=var_prior, discount=.95)
+dlm = DLM(gas, model.F, G=model.G, mean_prior=mean_prior,
+          var_prior=var_prior, discount=.95)

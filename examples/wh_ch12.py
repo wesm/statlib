@@ -62,10 +62,9 @@ if __name__ == '__main__':
 
     models = {}
     for delta in discounts:
-        models['%.2f' % delta] = ConstantDLM(y, x,
-                                             mean_prior=mean_prior,
-                                             var_prior=var_prior,
-                                             discount=delta)
+        models['%.2f' % delta] = DLM(y, x, mean_prior=mean_prior,
+                                     var_prior=var_prior,
+                                     discount=delta)
 
     mix = DLMMixture(models)
     multi = get_multi_model()
