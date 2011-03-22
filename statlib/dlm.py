@@ -21,10 +21,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 
 from statlib.tools import chain_dot, nan_array
-from statlib.plotting import plotf
-import statlib.tools as tools
 import statlib.distributions as distm
-from pandas.util.testing import set_trace as st
 
 m_ = np.array
 
@@ -58,9 +55,9 @@ class DLM(object):
     mu_mode = None # mt
     mu_scale = None # Ct
     mu_forc_mode = None # at
+    mu_forc_scale = None # Rt
     var_est = None # St
     forc_var = None # Qt
-    R = None # Rt
 
     def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
                  discount=0.9):
@@ -79,8 +76,14 @@ class DLM(object):
         else:
             self.ndim = F.shape[1]
 
+        f_shape = self.nobs, self.ndim
         # constant DLM handling
-        self._set_F(F)
+        if F.ndim == 1:
+            self.F = np.ones(f_shape) * F
+        else:
+            if len(F) == 1 and self.nobs > 1:
+                F = np.ones(f_shape) * F[0]
+            self.F = F
 
         if G is None:
             G = np.eye(self.ndim)
@@ -99,14 +102,6 @@ class DLM(object):
         self.v0 = df0v0 / df0
 
         self._compute_parameters()
-
-    def _set_F(self, F):
-        if F.ndim == 1:
-            self.F = np.ones((self.nobs, self.ndim)) * F
-        else:
-            if len(F) == 1 and self.nobs > 1:
-                F = np.ones((self.nobs, self.ndim)) * F[0]
-            self.F = F
 
     def _compute_parameters(self):
         """
@@ -128,8 +123,9 @@ class DLM(object):
          self.mu_scale,
          self.var_est,
          self.forc_var,
-         self.R) = _filter_python(self.y, self.F, self.G, self.disc,
-                                  self.df0, self.v0, self.m0, self.C0)
+         self.mu_forc_scale) = _filter_python(self.y, self.F, self.G, self.disc,
+                                              self.df0, self.v0, self.m0,
+                                              self.C0)
 
     def backward_sample(self, steps=1):
         """
@@ -137,29 +133,34 @@ class DLM(object):
 
         .. math:: p(\theta_{t-k} | D_t)
         """
+        from statlib.distributions import rmvnorm
+
         if steps != 1:
             raise Exception('only do one step backward sampling for now...')
 
+        T = self.nobs
         # Backward sample
-        mu = np.zeros((self.nobs + 1, self.ndim))
+        mu_draws = np.zeros((T + 1, self.ndim))
+
+        m = self.mu_mode
+        C = self.mu_scale
+        a = self.mu_forc_mode
+        R = self.mu_forc_scale
+
+        mu_draws[T] = rmvnorm(m[T], C[T])
 
         # initial values for smoothed dist'n
-        for t in xrange(T, -1, -1):
-            if t == T:
-                # sample from posterior
-                fm = mode[-1]
-                fR = C[-1]
-            else:
-                # B_{t} = C_t G_t+1' R_t+1^-1
-                B = np.dot(C[t] * phi, la.inv(R[t+1:t+2]))
+        for t in xrange(T-1, -1, -1):
+            # B_{t} = C_t G_t+1' R_t+1^-1
+            B = chain_dot(C[t], self.G, R[t+1])
 
-                # smoothed mean
-                fm = mode[t] + np.dot(B, mode[t+1] - a[t+1])
-                fR = C[t] + chain_dot(B, C[t+1] - R[t+1], B.T)
+            # smoothed mean
+            ht = m[t] + np.dot(B, mu_draws[t+1] - a[t+1])
+            Ht = C[t] - chain_dot(B, R[t+1], B.T)
 
-            mu[t] = dist.rmvnorm(fm, np.atleast_2d(fR))
+            mu_draws[t] = rmvnorm(ht, np.atleast_2d(Ht))
 
-        return mu.squeeze()
+        return mu_draws.squeeze()
 
     def plot_forc(self, alpha=0.10, ax=None):
         if ax is None:
@@ -307,7 +308,8 @@ class DLM2(DLM):
 
 class MVDLM(object):
     """
-    Matrix-variate DLM with matrix normal inverse Wishart prior
+    Matrix-variate DLM with matrix normal inverse Wishart prior and discount
+    factor on covariance
 
     Parameters
     ----------
@@ -329,42 +331,42 @@ class MVDLM(object):
     Sigma ~ IW(n, D)
     """
 
-    def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
-                 discount=0.9):
-        self.dates = y.index
+    def __init__(self, y, F, G=None, V=1, mean_prior=None, var_prior=None,
+                 state_discount=0.9, cov_discount=0.95):
         self.y = m_(y)
+        self.dates = y.index
+        self.names = y.columns
 
         self.nobs, self.ndim = self.y.shape
-        self.nparam = F.shape[1]
 
-        if self.y.ndim == 1:
-            pass
-        else:
-            raise Exception
+        assert(self.y.ndim == 2)
 
         F = m_(F)
-        self._set_F(F)
+        if F.ndim == 1:
+            self.nparam = len(F)
+            shape = (self.nobs, self.nparam)
+            F = np.ones(shape) * F
+        else:
+            self.nparam = F.shape[1]
+            shape = (self.nobs, self.nparam)
+            if len(F) == 1 and self.nobs > 1:
+                F = np.ones(shape) * F[0]
 
-        if G is None:
-            G = np.eye(self.ndim)
-
+        self.F = F
         self.G = G
+        self.V = V
 
         self.mean_prior = mean_prior
         self.var_prior = var_prior
-        self.disc = discount
 
-        df0, df0v0 = var_prior
-        self.df = df0 + np.arange(self.nobs + 1) # precompute
+        self.beta = cov_discount
+        self.delta = state_discount
 
+        self.n0, self.D0 = var_prior
         self.m0, self.C0 = mean_prior
-        self.df0 = df0
-        self.v0 = df0v0 / df0
 
-        # self._compute_parameters()
-
-    def _set_F(self, F):
-        self.F = F
+        self.df = self.n0 + np.arange(self.nobs + 1) # precompute
+        self._compute_parameters()
 
     def _compute_parameters(self):
         """
@@ -381,77 +383,78 @@ class MVDLM(object):
         -------
 
         """
-        (self.mu_mode, self.mu_forc_mode,
-         self.mu_scale, self.var_est,
-         self.forc_var, self.R) = _filter_python(self.y, self.F, self.G,
-                                                 self.disc, self.df0, self.v0,
-                                                 self.m0, self.C0)
+        (self.mu_mode,
+         self.mu_forc_mode,
+         self.mu_scale,
+         self.var_est,
+         self.forc_var) = _mvfilter_python(self.y, self.F, self.G, self.V,
+                                           self.delta, self.beta, self.n0,
+                                           self.D0, self.m0, self.C0)
 
 
-def _mvfilter_python(Y, F, G, V, delta, df0, v0, m0, C0):
+from pandas.util.testing import set_trace as st
+
+def _mvfilter_python(Y, F, G, V, delta, beta, df0, v0, m0, C0):
     """
     Matrix-variate DLM update equations
 
     V : V_t sequence
     """
-
-    nobs, ndim = Y.shape
-    nparam = len(G)
-
-    mode = nan_array(nobs + 1, nparam)
-    a = nan_array(nobs + 1, nparam)
-    C = nan_array(nobs + 1, nparam, nparam)
-    R = nan_array(nobs + 1, nparam, nparam)
-
-    # variance multiplier term
-    Q = nan_array(nobs)
-
-    # scale matrix
-    D = nan_array(nobs + 1, ndim, ndim)
-
-    # covariance estimate D / n
-    S = nan_array(nobs + 1, ndim, ndim)
+    nobs, k = Y.shape
+    p = F.shape[1]
+    mode = nan_array(nobs + 1, p, k) # theta posterior mode
+    C = nan_array(nobs + 1, p, p) # theta posterior scale
+    a = nan_array(nobs + 1, p, k) # theta forecast mode
+    Q = nan_array(nobs) # variance multiplier term
+    D = nan_array(nobs + 1, k, k) # scale matrix
+    S = nan_array(nobs + 1, k, k) # covariance estimate D / n
+    df = nan_array(nobs + 1)
 
     mode[0] = m0
     C[0] = C0
-
-    df = df0 + np.arange(nobs + 1) # precompute
+    df[0] = df0
     S[0] = v0
+
+    Mt = m0
+    Ct = C0
+    n = df0
+    d = n + k - 1
+    Dt = D0
+    St = Dt / n
 
     # allocate result arrays
     for t in xrange(1, nobs + 1):
-        obs = Y[t - 1]
-        Ft = F[t - 1]
+        obs = Y[t - 1:t].T
+        Ft = F[t - 1:t].T
 
         # derive innovation variance from discount factor
+        # only discount after first time step?
+        if G is not None:
+            at = np.dot(G, Mt)
+            Rt = chain_dot(G, Ct, G.T) / delta
+        else:
+            at = Mt
+            Rt = Ct / delta
 
-        at = mode[t - 1]
-        Rt = C[t - 1]
-        if t > 1 and G is not None:
-            # only discount after first time step!
-            at = np.dot(G, mode[t - 1])
-            Rt = chain_dot(G, C[t - 1], G.T) / delta
-
-        Qt = chain_dot(Ft.T, Rt, Ft) + V[t-1]
-
-        At = np.dot(Rt, Ft) / Qt
-
-        # forecast theta as time t
-        ft = np.dot(at, Ft)
-        err = obs - ft
+        et = obs - np.dot(at.T, Ft)
+        qt = chain_dot(Ft.T, Rt, Ft) + V
+        At = np.dot(Rt, Ft) / qt
 
         # update mean parameters
-        mode[t] = at + np.dot(At, err.T)
+        n = beta * n
+        b = (n + k - 1) / d
+        n = n + 1
+        d = n + k - 1
 
-        D[t] = D[t-1] + np.outer(err, err) / Qt
+        Dt = b * Dt + np.dot(et, et.T) / qt
+        St = Dt / n
+        Mt = at + np.dot(At, et.T)
+        Ct = Rt - np.dot(At, At.T) * qt
 
-        S[t] = D[t] / df[t]
-        C[t] = Rt - np.dot(At, At.T) * Qt
-        a[t] = at
-        Q[t-1] = Qt
-        R[t] = Rt
+        C[t] = Ct; df[t] = n; S[t] = (St + St.T) / 2; mode[t] = Mt
+        D[t] = Dt; a[t] = at; Q[t-1] = qt
 
-    return mode, a, C, S, Q, R
+    return mode, a, C, S, Q
 
 def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
     """
@@ -485,10 +488,13 @@ def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
         # derive innovation variance from discount factor
         at = mode[t - 1]
         Rt = C[t - 1]
-        if t > 1 and G is not None:
+        if t > 1:
             # only discount after first time step!
-            at = np.dot(G, mode[t - 1])
-            Rt = chain_dot(G, C[t - 1], G.T) / delta
+            if G is not None:
+                at = np.dot(G, mode[t - 1])
+                Rt = chain_dot(G, C[t - 1], G.T) / delta
+            else:
+                Rt = C[t - 1] / delta
 
         Qt = chain_dot(Ft, Rt, Ft) + S[t-1]
         At = np.dot(Rt, Ft) / Qt
@@ -508,6 +514,28 @@ def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
 
     return mode, a, C, S, Q, R
 
+def rmatnorm(M, U, V):
+    """
+    Generate matrix-normal random variates
+
+    Parameters
+    ----------
+    M : ndarray (r x q)
+        mean matrix
+    U : ndarray (r x r)
+        row covariance matrix
+    V : ndarray (q x q)
+        column covariance matrix
+
+    Notes
+    -----
+    Y ~ MN(M, U, V) if vec(Y) ~ N(vec(M), kron(V, U))
+    """
+    mean = M.ravel('F')
+    cov = np.kron(V, U)
+    draw = np.random.multivariate_normal(mean, cov)
+    return draw.reshape(M.shape, order='F')
+
 def _filter_cython(Y, F, G, delta, df0, v0, m0, C0):
     import statlib.ffbs as ffbs
 
@@ -520,9 +548,40 @@ def _filter_cython(Y, F, G, delta, df0, v0, m0, C0):
     return mode, a, Q, C, S
 
 if __name__ == '__main__':
+    import statlib.components as comp
+    reload(comp)
+    from statlib.components import VectorAR
     import statlib.datasets as ds
 
     returns = ds.fx_rates_returns()
-    F = np.ones((1, len(returns.columns)))
+    spot = ds.fx_rates_spot()
+    k = len(returns.columns)
 
-    model = MVDLM(returns, F)
+    spot = np.log(spot)
+
+    # F = np.array([1])
+    lags = 2
+    VAR_comp = VectorAR(spot, lags=lags)
+    F = VAR_comp.F
+
+    Y = spot[lags:]
+    Yv = Y.values
+
+    n0 = 2
+    d0 = n0 + k - 1
+    D0 = n0 * np.eye(k) * np.diff(Yv, axis=0).var(0, ddof=1).mean() / 100
+    delta = 0.99995
+    beta = 0.95
+
+    p = F.shape[1]
+    m0 = np.zeros((p, k))
+    m0[1:k+1] = np.eye(k)
+
+    mean_prior = m0, 1000 * np.eye(p)
+    var_prior = 2, D0
+
+    model = MVDLM(Y, F,
+                  state_discount=delta, cov_discount=beta,
+                  mean_prior=mean_prior, var_prior=var_prior)
+
+

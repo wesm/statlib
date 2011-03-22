@@ -1,5 +1,5 @@
 """
-Components for specifying dynamic linear models
+Components for specifying dynamic linear (state space) models
 
 Notes
 -----
@@ -46,7 +46,25 @@ class Regression(Component):
             F = np.atleast_2d(F).T
 
         G = np.eye(F.shape[1])
-        Component.__init__(self, F, G, discount=discount)
+
+        super(Regression, self).__init__(F, G, discount=discount)
+
+class AR(Component):
+    pass
+
+class VectorAR(Component):
+
+    def __init__(self, X, lags=1, intercept=True, discount=None):
+        nobs = len(X) - lags
+
+        X = np.asarray(X)
+        F = np.concatenate([X[lags - i:-i] for i in range(1, lags + 1)], axis=1)
+        G = None
+
+        if intercept:
+            F = np.c_[np.ones((nobs, 1)), F]
+
+        super(VectorAR, self).__init__(F, G, discount=discount)
 
 class ARMA(Component):
     """
