@@ -460,9 +460,6 @@ def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
     """
     Univariate DLM update equations
     """
-    from pandas.util.testing import set_trace as st
-    st()
-
     nobs = len(Y)
     ndim = len(G)
 
