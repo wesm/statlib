@@ -460,6 +460,8 @@ def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
     """
     Univariate DLM update equations
     """
+    from pandas.util.testing import set_trace as st
+    st()
 
     nobs = len(Y)
     ndim = len(G)
@@ -480,7 +482,7 @@ def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
     # allocate result arrays
     for i, obs in enumerate(Y):
         # column vector, for W&H notational consistency
-        Ft = F[i]
+        Ft = F[i:i+1].T
 
         # advance index: y_1 through y_nobs, 0 is prior
         t = i + 1
@@ -496,11 +498,11 @@ def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
             else:
                 Rt = C[t - 1] / delta
 
-        Qt = chain_dot(Ft, Rt, Ft) + S[t-1]
+        Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
         At = np.dot(Rt, Ft) / Qt
 
         # forecast theta as time t
-        ft = np.dot(Ft, at)
+        ft = np.dot(Ft.T, at)
         err = obs - ft
 
         # update mean parameters
