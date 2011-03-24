@@ -1,5 +1,8 @@
 """
-
+Notes
+-----
+References
+Ishwaran & James (2001) Gibbs Sampling Methods for Stick-Breaking Priors
 """
 
 import scipy.stats as stats
@@ -8,6 +11,8 @@ import numpy as np
 import pymc
 import pymc.flib as flib
 import gpustats
+
+import statlib.ffbs as ffbs
 
 class DPNormalMixture(object):
     """
@@ -33,10 +38,8 @@ class DPNormalMixture(object):
 
         # TODO hyperparameters
         self.mu_prior_mean = None # prior mean for component means
-
         self.nu = None # prior degrees of freedom
         self.Phi = None # prior location for Sigma_j's
-
         self.gamma = None
 
     def sample(self, niter=1000, nburn=0, thin=1):
@@ -67,7 +70,11 @@ class DPNormalMixture(object):
 
     def _update_labels(self, mu, Sigma, weights):
         # GPU business happens?
-        pass
+        densities = gpustats.mvnpdf_multi(self.data, mu, Sigma)
+        densities = (densities.T / densities.sum(1)).T
+
+        # convert this to run in the GPU
+        return ffbs.sample_discrete(densities)
 
     def _update_stick_weights(self, counts, alpha):
         reverse_cumsum = counts[::-1].cumsum()[::-1]
@@ -126,3 +133,8 @@ def stick_break(V):
 
 def _get_mask(labels, ncomp):
     return np.equal.outer(np.arange(ncomp), labels)
+
+
+
+if __name__ == '__main__':
+    pass
