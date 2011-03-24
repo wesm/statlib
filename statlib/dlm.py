@@ -13,6 +13,9 @@ TODO
 ----
 handling of missing data
 """
+
+# pylint: disable=W0201
+
 from __future__ import division
 
 from numpy import log
@@ -392,8 +395,6 @@ class MVDLM(object):
                                            self.D0, self.m0, self.C0)
 
 
-from pandas.util.testing import set_trace as st
-
 def _mvfilter_python(Y, F, G, V, delta, beta, df0, v0, m0, C0):
     """
     Matrix-variate DLM update equations
@@ -458,7 +459,7 @@ def _mvfilter_python(Y, F, G, V, delta, beta, df0, v0, m0, C0):
 
 def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
     """
-    Univariate DLM update equations
+    Univariate DLM update equations with unknown observation variance
     """
     nobs = len(Y)
     ndim = len(G)
