@@ -203,3 +203,25 @@ def sample_discrete(ndarray[double_t, ndim=2] probs):
                 break
 
     return output
+
+def f32_sample_discrete(ndarray[float, ndim=2] probs):
+    '''
+    Random
+    '''
+
+    cdef int32_t i, K = probs.shape[1], T = len(probs)
+    cdef ndarray[double_t, ndim=1] draws = np.random.rand(T)
+    cdef ndarray[int32_t, ndim=1] output = np.empty(T, dtype=np.int32)
+
+    cdef double_t the_sum, draw
+    for i from 0 <= i < T:
+        the_sum = 0
+        draw = draws[i]
+        for j from 0 <= j < K:
+            the_sum += probs[i, j]
+
+            if the_sum >= draw:
+                output[i] = j
+                break
+
+    return output

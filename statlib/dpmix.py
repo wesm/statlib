@@ -15,29 +15,28 @@ import gpustats
 
 import statlib.ffbs as ffbs
 
+from pandas.util.testing import set_trace as st
+
 class DPNormalMixture(object):
     """
     Truncated Dirichlet Process Mixture of Normals
 
     Parameters
     ----------
+    data : ndarray (nobs x ndim)
+    ncomp : int
+        Number of mixture components
 
     Notes
     -----
-
-    \alpha ~ Ga(a, b)
+    y ~ \sum_{j=1}^J \pi_j {\cal N}(\mu_j, \Sigma_j)
+    \alpha ~ Ga(e, f)
+    \Sigma_j ~ IW(nu0 + 2, nu0 * \Phi_j)
 
     Returns
     -------
     **Attributes**
     """
-    # alpha hyperparameters
-    e = f = 1
-    weights = None
-    mu = None
-    Sigma = None
-    alpha = None
-    stick_weights = None
 
     def __init__(self, data, ncomp=256, alpha0=1, nu0=None, Phi0=None,
                  mu0=None, Sigma0=None, weights0=None, alpha_a0=1,
@@ -47,18 +46,37 @@ class DPNormalMixture(object):
         self.ncomp = ncomp
 
         # TODO hyperparameters
-        self.mu_prior_mean = None # prior mean for component means
+        # prior mean for component means
+        self.mu_prior_mean = np.zeros(self.ndim)
+        self.gamma = np.ones(ncomp)
+
+        self._set_initial_values(alpha0, nu0, Phi0, mu0, Sigma0,
+                                 weights0, alpha_a0, alpha_b0)
+
+    def _set_initial_values(self, alpha0, nu0, Phi0, mu0, Sigma0, weights0,
+                            alpha_a0, alpha_b0):
+        if nu0 is None:
+            nu0 = 3
+
+        if Phi0 is None:
+            Phi0 = np.empty((self.ncomp, self.ndim, self.ndim))
+            Phi0[:] = np.eye(self.ndim) * (nu0 - 1)
+
+        if Sigma0 is None:
+            # draw from prior
+            Sigma0 = np.empty((self.ncomp, self.ndim, self.ndim))
+            for j in xrange(self.ncomp):
+                Sigma0[j] = pm.rinverse_wishart(nu0 + 2 + self.ncomp, Phi0[j])
 
         # starting values, are these sensible?
         if mu0 is None:
-            mu0 = np.zeros((self.ncomp, self.ndim))
-        if Sigma0 is None:
-            Sigma0 = np.zeros((self.ncomp, self.ndim, self.ndim))
-        if Phi0 is None:
-            Phi0 = np.empty((self.ncomp, self.ndim, self.ndim))
-            Phi0[:] = np.eye(self.ndim)
-        if nu0 is None:
-            nu0 = np.ones(self.ncomp)
+            mu0 = np.empty((self.ncomp, self.ndim))
+            for j in xrange(self.ncomp):
+                mu0[j] = pm.rmv_normal_cov(self.mu_prior_mean,
+                                           self.gamma[j] * Sigma0[j])
+
+        if weights0 is None:
+            _, weights0 = stick_break_proc(1, 1, size=self.ncomp - 1)
 
         self._alpha0 = alpha0
         self._alpha_a0 = alpha_a0
@@ -70,8 +88,6 @@ class DPNormalMixture(object):
         self._nu0 = nu0 # prior degrees of freedom
         self._Phi0 = Phi0 # prior location for Sigma_j's
 
-        self.gamma = np.ones(ncomp)
-
     def sample(self, niter=1000, nburn=0, thin=1):
         self._setup_storage(niter)
 
@@ -80,17 +96,15 @@ class DPNormalMixture(object):
         mu = self._mu0
         Sigma = self._Sigma0
 
-        for i in range(-nburn, niter + 1):
-            if i % 50 == 0:
-                print i
+        for i in range(-nburn, niter):
+            print i
 
             labels = self._update_labels(mu, Sigma, weights)
 
             component_mask = _get_mask(labels, self.ncomp)
             counts = component_mask.sum(1)
+            stick_weights, weights = self._update_stick_weights(counts, alpha)
 
-            stick_weights = self._update_stick_weights(counts, alpha)
-            weights = _stick_break(stick_weights)
             alpha = self._update_alpha(stick_weights)
             mu, Sigma = self._update_mu_Sigma(Sigma, counts)
 
@@ -102,6 +116,15 @@ class DPNormalMixture(object):
             self.alpha[i] = alpha
             self.mu[i] = mu
             self.Sigma[i] = Sigma
+
+    # so pylint won't complain so much
+    # alpha hyperparameters
+    e = f = 1
+    weights = None
+    mu = None
+    Sigma = None
+    alpha = None
+    stick_weights = None
 
     def _setup_storage(self, niter=1000, thin=1):
         nresults = niter // thin
@@ -117,12 +140,19 @@ class DPNormalMixture(object):
         densities = (densities.T / densities.sum(1)).T
 
         # convert this to run in the GPU
-        return ffbs.sample_discrete(densities)
+        return ffbs.f32_sample_discrete(densities)
 
     def _update_stick_weights(self, counts, alpha):
+        """
+
+        """
         reverse_cumsum = counts[::-1].cumsum()[::-1]
-        dist = stats.beta(1 + counts[:-1], alpha + reverse_cumsum[1:])
-        return dist.rvs(self.nobs - 1)
+
+        a = 1 + counts[:-1]
+        b = alpha + reverse_cumsum[1:]
+
+        stick_weights, mixture_weights = stick_break_proc(a, b)
+        return stick_weights, mixture_weights
 
     def _update_alpha(self, V):
         a = self.ncomp + self.e - 1
@@ -142,18 +172,17 @@ class DPNormalMixture(object):
             sumxj = Xj.sum(0)
 
             gam = self.gamma[j]
-            mu_hyper = self.mu_prior_mean[j]
+            mu_hyper = self.mu_prior_mean
 
             post_mean = (mu_hyper / gam + sumxj) / (1 / gam + nj)
-            post_cov = 1 / (1 / gam + nj) * Sigma
+            post_cov = 1 / (1 / gam + nj) * Sigma[j]
             new_mu = pm.rmv_normal_cov(post_mean, post_cov)
-
 
             Xj_demeaned = Xj - new_mu
 
             mu_SS = np.outer(new_mu - mu_hyper, new_mu - mu_hyper) / gam
             data_SS = np.outer(Xj_demeaned, Xj_demeaned)
-            post_Phi = data_SS + mu_SS + self._nu0[j] * self._Phi0[j]
+            post_Phi = data_SS + mu_SS + self._nu0 * self._Phi0[j]
 
             # symmetrize
             post_Phi = (post_Phi + post_Phi.T) / 2
@@ -168,22 +197,45 @@ class DPNormalMixture(object):
 
         return mu_output, Sigma_output
 
-def _stick_break(V):
-    pi = (1 - V).cumprod()
-    pi = np.empty(len(V) + 1)
-    pi[0] = V[0]
+def stick_break_proc(beta_a, beta_b, size=None):
+    """
+    Kernel stick breaking procedure for truncated Dirichlet Process
 
+    Parameters
+    ----------
+    beta_a : scalar or array-like
+    beta_b : scalar or array-like
+    size : int, default None
+        If array-like a, b, leave as None
+
+    Notes
+    -----
+
+
+    Returns
+    -------
+    (stick_weights, mixture_weights) : (1d ndarray, 1d ndarray)
+    """
+    if not np.isscalar(beta_a):
+        size = len(beta_a)
+        assert(size == len(beta_b))
+    else:
+        assert(size is not None)
+
+    dist = stats.beta(beta_a, beta_b)
+    V = stick_weights = dist.rvs(size)
+    pi = mixture_weights = np.empty(len(V) + 1)
+
+    pi[0] = V[0]
     v_cumprod = (1 - V).cumprod()
     pi[1:-1] = V[1:] * v_cumprod[:-1]
     pi[-1] = v_cumprod[-1]
 
-    return pi
+    return stick_weights, mixture_weights
 
 def _get_mask(labels, ncomp):
     return np.equal.outer(np.arange(ncomp), labels)
 
-
-import matplotlib.pyplot as plt
 
 #-------------------------------------------------------------------------------
 # Generate MV normal mixture
@@ -233,26 +285,19 @@ def generate_data(n=1e5, k=2, ncomps=3, seed=1):
             np.concatenate(data_concat, axis=0))
 
 def plot_2d_mixture(data, labels):
+    import matplotlib.pyplot as plt
+
     plt.figure(figsize=(10, 10))
     colors = 'bgr'
     for j in np.unique(labels):
         x, y = data[labels == j].T
         plt.plot(x, y, '%s.' % colors[j], ms=2)
 
-
-def plot_thetas(sampler):
-    plot_2d_mixture(data, true_labels)
-
-    def plot_theta(i):
-        x, y = sampler.trace('theta_%d' % i)[:].T
-        plt.plot(x, y, 'k.')
-
-    for i in range(3):
-        plot_theta(i)
-
 if __name__ == '__main__':
-    N = int(1e5) # n data points per component
+    N = int(1e6) # n data points per component
     K = 2 # ndim
     ncomps = 3 # n mixture components
     true_labels, data = generate_data(n=N, k=K, ncomps=ncomps)
 
+    model = DPNormalMixture(data, ncomp=32)
+    model.sample(100, nburn=0)
