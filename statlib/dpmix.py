@@ -4,6 +4,9 @@ Notes
 References
 Ishwaran & James (2001) Gibbs Sampling Methods for Stick-Breaking Priors
 """
+from __future__ import division
+
+import matplotlib.pyplot as plt
 
 import scipy.stats as stats
 
@@ -14,8 +17,6 @@ import pymc as pm
 import gpustats
 
 import statlib.ffbs as ffbs
-
-from pandas.util.testing import set_trace as st
 
 class DPNormalMixture(object):
     """
@@ -66,7 +67,7 @@ class DPNormalMixture(object):
             # draw from prior
             Sigma0 = np.empty((self.ncomp, self.ndim, self.ndim))
             for j in xrange(self.ncomp):
-                Sigma0[j] = pm.rinverse_wishart(nu0 + 2 + self.ncomp, Phi0[j])
+                Sigma0[j] = pm.rinverse_wishart_prec(nu0 + 2 + self.ncomp, Phi0[j])
 
         # starting values, are these sensible?
         if mu0 is None:
@@ -96,19 +97,31 @@ class DPNormalMixture(object):
         mu = self._mu0
         Sigma = self._Sigma0
 
-        for i in range(-nburn, niter):
-            print i
+        ax = plt.gca()
 
+        for i in range(-nburn, niter):
             labels = self._update_labels(mu, Sigma, weights)
 
             component_mask = _get_mask(labels, self.ncomp)
             counts = component_mask.sum(1)
+
             stick_weights, weights = self._update_stick_weights(counts, alpha)
 
             alpha = self._update_alpha(stick_weights)
-            mu, Sigma = self._update_mu_Sigma(Sigma, counts)
+            mu, Sigma = self._update_mu_Sigma(Sigma, component_mask)
 
-            if i <= 0:
+            if i % 50 == 0:
+                print i, counts
+                print np.c_[mu, weights]
+
+            '''
+                for j in xrange(self.ncomp):
+                    ax.plot(self.weights[:i, j])
+                plt.show()
+                plt.draw_if_interactive()
+            '''
+
+            if i < 0:
                 continue
 
             self.stick_weights[i] = stick_weights
@@ -128,11 +141,11 @@ class DPNormalMixture(object):
 
     def _setup_storage(self, niter=1000, thin=1):
         nresults = niter // thin
-        self.weights = np.ones((nresults, self.ncomp))
-        self.mu = np.ones((nresults, self.ncomp, self.ndim))
-        self.Sigma = np.ones((nresults, self.ncomp, self.ndim, self.ndim))
-        self.alpha = np.ones(nresults)
-        self.stick_weights = np.ones((nresults, self.ncomp - 1))
+        self.weights = np.zeros((nresults, self.ncomp))
+        self.mu = np.zeros((nresults, self.ncomp, self.ndim))
+        self.Sigma = np.zeros((nresults, self.ncomp, self.ndim, self.ndim))
+        self.alpha = np.zeros(nresults)
+        self.stick_weights = np.zeros((nresults, self.ncomp - 1))
 
     def _update_labels(self, mu, Sigma, weights):
         # GPU business happens?
@@ -176,12 +189,13 @@ class DPNormalMixture(object):
 
             post_mean = (mu_hyper / gam + sumxj) / (1 / gam + nj)
             post_cov = 1 / (1 / gam + nj) * Sigma[j]
+
             new_mu = pm.rmv_normal_cov(post_mean, post_cov)
 
             Xj_demeaned = Xj - new_mu
 
             mu_SS = np.outer(new_mu - mu_hyper, new_mu - mu_hyper) / gam
-            data_SS = np.outer(Xj_demeaned, Xj_demeaned)
+            data_SS = np.dot(Xj_demeaned.T, Xj_demeaned)
             post_Phi = data_SS + mu_SS + self._nu0 * self._Phi0[j]
 
             # symmetrize
@@ -190,7 +204,9 @@ class DPNormalMixture(object):
             # P(Sigma) ~ IW(nu + 2, nu * Phi)
             # P(Sigma | theta, Y) ~
             post_nu = nj + self.ncomp + self._nu0 + 3
-            new_Sigma = pm.rinverse_wishart(post_nu, post_Phi)
+
+            # pymc rinverse_wishart takes
+            new_Sigma = pm.rinverse_wishart_prec(post_nu, post_Phi)
 
             mu_output[j] = new_mu
             Sigma_output[j] = new_Sigma
@@ -227,10 +243,17 @@ def stick_break_proc(beta_a, beta_b, size=None):
     pi = mixture_weights = np.empty(len(V) + 1)
 
     pi[0] = V[0]
+    prod = (1 - V[0])
+    for k in xrange(2, len(V)):
+        pi[k] = prod * V[k]
+        prod *= 1 - V[k]
+    pi[-1] = prod
+
+    '''
     v_cumprod = (1 - V).cumprod()
     pi[1:-1] = V[1:] * v_cumprod[:-1]
     pi[-1] = v_cumprod[-1]
-
+    '''
     return stick_weights, mixture_weights
 
 def _get_mask(labels, ncomp):
@@ -294,10 +317,11 @@ def plot_2d_mixture(data, labels):
         plt.plot(x, y, '%s.' % colors[j], ms=2)
 
 if __name__ == '__main__':
-    N = int(1e6) # n data points per component
+    N = int(1e4) # n data points per component
     K = 2 # ndim
     ncomps = 3 # n mixture components
+    npr.seed(1)
     true_labels, data = generate_data(n=N, k=K, ncomps=ncomps)
 
-    model = DPNormalMixture(data, ncomp=32)
-    model.sample(100, nburn=0)
+    model = DPNormalMixture(data, ncomp=256)
+    model.sample(2000)
