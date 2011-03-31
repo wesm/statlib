@@ -22,6 +22,8 @@ def configuration(parent_package='', top_path=None):
                          **ext_kwds)
     config.add_extension('statlib.ffbs', sources=['statlib/src/ffbs.pyx'],
                          **ext_kwds)
+    config.add_extension('statlib.filter', sources=['statlib/src/filter.pyx'],
+                         **ext_kwds)
 
     return config
 

@@ -25,6 +25,7 @@ import scipy.stats as stats
 
 from statlib.tools import chain_dot, nan_array
 import statlib.distributions as distm
+import statlib.filter as filt
 
 from pandas.util.testing import set_trace as st
 
@@ -150,6 +151,11 @@ class DLM(object):
         if var_prior is not None:
             n0, s0 = var_prior
 
+        if np.isscalar(m0):
+            m0 = np.array([m0])
+        if np.isscalar(C0):
+            C0 = np.array([[C0]])
+
         self.m0, self.C0 = m0, C0
         self.df0, self.s0 = n0, s0
 
@@ -176,12 +182,12 @@ class DLM(object):
          self.df,
          self.var_est,
          self.forc_var,
-         self.mu_forc_scale) = _filter_python(self.y, self.F,
-                                              self.G,
-                                              self.state_discount,
-                                              self.var_discount,
-                                              self.df0, self.s0,
-                                              self.m0, self.C0)
+         self.mu_forc_scale) = filt.filter_python(self.y, self.F,
+                                                  self.G,
+                                                  self.state_discount,
+                                                  self.var_discount,
+                                                  self.df0, self.s0,
+                                                  self.m0, self.C0)
 
     def backward_sample(self, steps=1):
         """
@@ -302,7 +308,9 @@ class DLM(object):
 
     @property
     def pred_like(self):
-        return stats.t.pdf(self.y, self.df[:-1],
+        # WH Table 10.4 re: variance discounting
+        df = self.var_discount * self.df[:-1]
+        return stats.t.pdf(self.y, df,
                            loc=self.forecast,
                            scale=np.sqrt(self.forc_var))
 
@@ -349,10 +357,10 @@ class VarDiscountDLM(DLM):
 class DLM2(DLM):
 
     def _compute_parameters(self):
-        (mode, a, Q, C, S) = _filter_cython(self.y, self.F, self.G,
-                                            self.state_discount,
-                                            self.df0, self.s0,
-                                            self.m0, self.C0)
+        (mode, a, Q, C, S) = filt.filter_cython(self.y, self.F, self.G,
+                                                self.state_discount,
+                                                self.df0, self.s0,
+                                                self.m0, self.C0)
 
         self.forc_var = Q
         self.mu_forc_mode = a
@@ -441,9 +449,9 @@ class MVDLM(object):
          self.mu_forc_mode,
          self.mu_scale,
          self.var_est,
-         self.forc_var) = _mvfilter_python(self.y, self.F, self.G, self.V,
-                                           self.delta, self.beta, self.n0,
-                                           self.D0, self.m0, self.C0)
+         self.forc_var) = filt.filter_python(self.y, self.F, self.G, self.V,
+                                             self.delta, self.beta, self.n0,
+                                             self.D0, self.m0, self.C0)
 
 
 def _mvfilter_python(Y, F, G, V, delta, beta, df0, v0, m0, C0):
@@ -514,198 +522,6 @@ prof = LineProfiler()
 class DLMFilter(object):
     # should go into Cython
     pass
-
-def _filter_python_multi(Y, F, G, delta, df0, v0, m0, C0):
-    """
-    Univariate DLM update equations with unknown observation variance
-
-    Done with numpy.matrix objects so works with multivariate case. About 3-4x
-    slower than specializing to the 1d case and using vectors / regular ndarrays
-    """
-    nobs = len(Y)
-    ndim = len(G)
-
-    mode = nan_array(nobs + 1, ndim)
-    a = nan_array(nobs + 1, ndim)
-    C = nan_array(nobs + 1, ndim, ndim)
-    S = nan_array(nobs + 1)
-    Q = nan_array(nobs)
-    R = nan_array(nobs + 1, ndim, ndim)
-
-    df = df0 + np.arange(nobs + 1) # precompute
-    S[0] = St = float(v0)
-
-    mode[0] = m0
-    C[0] = Ct = np.asmatrix(C0)
-
-    mt = np.asmatrix(m0).T
-    Y = np.asmatrix(Y).T
-    F = np.asmatrix(F)
-    G = np.asmatrix(G)
-
-    # allocate result arrays
-    for i in xrange(nobs):
-        # column vector, for W&H notational consistency
-        Yt = Y[i].T
-        Ft = F[i].T
-
-        # advance index: y_1 through y_nobs, 0 is prior
-        t = i + 1
-
-        # derive innovation variance from discount factor
-        at = mt
-        Rt = Ct
-        if t > 1:
-            # only discount after first time step!
-            if G is not None:
-                at = G * mt
-                Rt = G * Ct * G.T / delta
-            else:
-                Rt = Ct / delta
-
-        Q[t-1] = Qt = Ft.T * Rt * Ft + St
-        At = Rt * Ft / Qt
-
-        # forecast theta as time t
-        ft = Ft.T * at
-        e = Yt - ft
-
-        # update mean parameters
-        mt = at + At * e
-        S[t] = St = St + (St / df[t]) * (e * e.T / Qt - 1)
-        C[t] = Ct = (St / S[t-1]) * (Rt - At * At.T * Qt)
-
-        mode[t] = mt.T
-        a[t] = at.T
-        R[t] = Rt
-
-    return mode, a, C, S, Q, R
-
-def _filter_python_old(Y, F, G, delta, df0, v0, m0, C0):
-    """
-    Univariate DLM update equations with unknown observation variance
-    """
-    nobs = len(Y)
-    ndim = len(G)
-
-    mode = nan_array(nobs + 1, ndim)
-    a = nan_array(nobs + 1, ndim)
-    C = nan_array(nobs + 1, ndim, ndim)
-    S = nan_array(nobs + 1)
-    Q = nan_array(nobs)
-    R = nan_array(nobs + 1, ndim, ndim)
-
-    mode[0] = m0
-    C[0] = C0
-
-    df = df0 + np.arange(nobs + 1) # precompute
-    S[0] = v0
-
-    # allocate result arrays
-    for i, obs in enumerate(Y):
-        # column vector, for W&H notational consistency
-        Ft = F[i:i+1].T
-
-        # advance index: y_1 through y_nobs, 0 is prior
-        t = i + 1
-
-        # derive innovation variance from discount factor
-        at = mode[t - 1]
-        Rt = C[t - 1]
-        if t > 1:
-            # only discount after first time step!
-            if G is not None:
-                at = np.dot(G, mode[t - 1])
-                Rt = chain_dot(G, C[t - 1], G.T) / delta
-            else:
-                Rt = C[t - 1] / delta
-
-        Qt = chain_dot(Ft.T, Rt, Ft) + S[t-1]
-        At = np.dot(Rt, Ft) / Qt
-
-        # forecast theta as time t
-        ft = np.dot(Ft.T, at)
-        e = obs - ft
-
-        # update mean parameters
-        mode[t] = at + np.dot(At, e)
-        S[t] = S[t-1] + (S[t-1] / df[t]) * ((e ** 2) / Qt - 1)
-        C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
-
-        a[t] = at
-        Q[t-1] = Qt
-        R[t] = Rt
-
-    return mode, a, C, df, S, Q, R
-
-def _filter_python(Y, F, G, delta, beta, df0, v0, m0, C0):
-    """
-    Univariate DLM update equations with unknown observation variance
-
-    delta : state discount
-    beta : variance discount
-    """
-    nobs = len(Y)
-    ndim = len(G)
-
-    mode = nan_array(nobs + 1, ndim)
-    a = nan_array(nobs + 1, ndim)
-    C = nan_array(nobs + 1, ndim, ndim)
-    S = nan_array(nobs + 1)
-    Q = nan_array(nobs)
-    R = nan_array(nobs + 1, ndim, ndim)
-    df = nan_array(nobs + 1)
-
-    mode[0] = mt = m0
-    C[0] = Ct = C0
-    df[0] = nt = float(df0)
-    S[0] = St = v0
-
-    dt = df0 * v0
-
-    # allocate result arrays
-    for i, obs in enumerate(Y):
-        # column vector, for W&H notational consistency
-        Ft = F[i:i+1].T
-
-        # advance index: y_1 through y_nobs, 0 is prior
-        t = i + 1
-
-        # derive innovation variance from discount factor
-        at = mt
-        Rt = Ct
-        if t > 1:
-            # only discount after first time step?
-            if G is not None:
-                at = np.dot(G, mt)
-                Rt = chain_dot(G, Ct, G.T) / delta
-            else:
-                Rt = Ct / delta
-
-        Qt = chain_dot(Ft.T, Rt, Ft) + St
-        At = np.dot(Rt, Ft) / Qt
-
-        # forecast theta as time t
-        ft = np.dot(Ft.T, at)
-        e = obs - ft
-
-        # update mean parameters
-        mode[t] = mt = at + np.dot(At, e)
-        dt = beta * dt + St * e * e / Qt
-        nt = beta * nt + 1
-        St = dt / nt
-
-        S[t] = St
-        Ct = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
-        Ct = (Ct + Ct.T) / 2 # symmetrize
-
-        df[t] = nt
-        C[t] = Ct
-        a[t] = at
-        Q[t-1] = Qt
-        R[t] = Rt
-
-    return mode, a, C, df, S, Q, R
 
 def rmatnorm(M, U, V):
     """

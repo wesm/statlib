@@ -50,7 +50,18 @@ class Regression(Component):
         super(Regression, self).__init__(F, G, discount=discount)
 
 class AR(Component):
-    pass
+
+    def __init__(self, X, lags=1, intercept=True, discount=None):
+        nobs = len(X) - lags
+        F = np.empty((nobs, lags))
+        for i in xrange(1, int(lags) + 1):
+            F[:, i-1] = X[lags - i:-i]
+
+        if intercept:
+            F = np.c_[np.ones((len(F), 1)), F]
+
+        G = None
+        super(AR, self).__init__(F, G, discount=discount)
 
 class VectorAR(Component):
 
@@ -58,7 +69,8 @@ class VectorAR(Component):
         nobs = len(X) - lags
 
         X = np.asarray(X)
-        F = np.concatenate([X[lags - i:-i] for i in range(1, lags + 1)], axis=1)
+        F = np.concatenate([X[lags - i:-i]
+                            for i in range(1, int(lags) + 1)], axis=1)
         G = None
 
         if intercept:
