@@ -171,8 +171,8 @@ def filter_python(ndarray[double_t, ndim=1] Y,
         obs = Y[i]
 
         # column vector, for W&H notational consistency
-        Ft = F[i]
-        # Ft = F[i:i+1].T
+        # Ft = F[i]
+        Ft = F[i:i+1].T
 
         # advance index: y_1 through y_nobs, 0 is prior
         t = i + 1
@@ -189,11 +189,11 @@ def filter_python(ndarray[double_t, ndim=1] Y,
                 Rt = Ct / delta
 
         # Qt = chain_dot(Ft.T, Rt, Ft) + St
-        Qt = chain_dot(Ft, Rt, Ft) + St
+        Qt = chain_dot(Ft.T, Rt, Ft) + St
         At = np.dot(Rt, Ft) / Qt
 
         # forecast theta as time t
-        ft = np.dot(Ft, at)
+        ft = np.dot(Ft.T, at)
         e = obs - ft
 
         # update mean parameters

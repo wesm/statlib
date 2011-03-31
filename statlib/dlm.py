@@ -20,6 +20,7 @@ from __future__ import division
 
 from numpy import log
 import numpy as np
+import numpy.linalg as LA
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 
@@ -159,9 +160,9 @@ class DLM(object):
         self.m0, self.C0 = m0, C0
         self.df0, self.s0 = n0, s0
 
-        self._compute_parameters()
+        self._forward_filter()
 
-    def _compute_parameters(self):
+    def _forward_filter(self):
         """
         Compute parameter estimates for Gaussian Univariate DLM
 
@@ -182,18 +183,63 @@ class DLM(object):
          self.df,
          self.var_est,
          self.forc_var,
-         self.mu_forc_scale) = filter_python(self.y, self.F,
-                                             self.G,
-                                             self.state_discount,
-                                             self.var_discount,
-                                             self.df0, self.s0,
-                                             self.m0, self.C0)
+         self.mu_forc_scale) = filt.filter_python(self.y, self.F,
+                                                  self.G,
+                                                  self.state_discount,
+                                                  self.var_discount,
+                                                  self.df0, self.s0,
+                                                  self.m0, self.C0)
+
+    def backward_smooth(self):
+        """
+        Compute posterior estimates of state vector given full data set,
+        i.e. p(\theta_t | D_T)
+
+        cf. W&H sections
+            4.7 / 4.8: regular smoothing recurrences (Theorem 4.4)
+            10.8.4 adjustments for variance discounting
+
+        Notes
+        -----
+        \theta_{t-k} | D_t ~ T_{n_t} [a_t(-k), (S_t / S_{t-k}) R_t(-k)]
+
+        Returns
+        -------
+        (filtered state mode,
+         filtered state cov,
+         filtered degrees of freedom)
+        """
+        beta = self.var_discount
+
+        T = self.nobs
+        a = self.mu_forc_mode
+        R = self.mu_forc_scale
+
+        fdf = self.df.copy()
+        fS = self.var_est.copy()
+        fm = self.mu_mode.copy()
+        fC = self.mu_scale.copy()
+
+        C = fC[T]
+        for t in xrange(T - 1, -1, -1):
+            B = chain_dot(fC[t], self.G.T, LA.inv(R[t+1]))
+
+            # W&H p. 364
+            fdf[t] = (1 - beta) * fdf[t] + beta * fdf[t + 1]
+            fS[t] = 1 / ((1 - beta) / fS[t] + beta / fS[t+1])
+
+            # W&H p. 113
+            fm[t] = fm[t] + np.dot(B, fm[t+1] - a[t+1])
+            C = fC[t] + chain_dot(B, C - R[t+1], B.T)
+            fC[t] = C * fS[T] / fS[t]
+
+        return fm, fC, fdf
 
     def backward_sample(self, steps=1):
         """
         Generate state sequence using distributions:
 
-        .. math:: p(\theta_{t-k} | D_t)
+        .. math:: p(\theta_{t} | \theta_{t + k} D_t)
         """
         from statlib.distributions import rmvnorm
 
@@ -214,7 +260,7 @@ class DLM(object):
         # initial values for smoothed dist'n
         for t in xrange(T-1, -1, -1):
             # B_{t} = C_t G_t+1' R_t+1^-1
-            B = chain_dot(C[t], self.G, R[t+1])
+            B = chain_dot(C[t], self.G.T, LA.inv(R[t+1]))
 
             # smoothed mean
             ht = m[t] + np.dot(B, mu_draws[t+1] - a[t+1])
@@ -356,7 +402,7 @@ class VarDiscountDLM(DLM):
 
 class DLM2(DLM):
 
-    def _compute_parameters(self):
+    def _forward_filter(self):
         (mode, a, Q, C, S) = filt.filter_cython(self.y, self.F, self.G,
                                                 self.state_discount,
                                                 self.df0, self.s0,
@@ -428,9 +474,9 @@ class MVDLM(object):
         self.m0, self.C0 = mean_prior
 
         self.df = self.n0 + np.arange(self.nobs + 1) # precompute
-        self._compute_parameters()
+        self._forward_filter()
 
-    def _compute_parameters(self):
+    def _forward_filter(self):
         """
         Compute parameter estimates for Gaussian Univariate DLM
 
@@ -555,8 +601,6 @@ def filter_python(Y, F, G, delta, beta, df0, v0, m0, C0):
     Q = nan_array(nobs)
     df = nan_array(nobs + 1)
 
-    st()
-
     mode[0] = mt = m0
     C[0] = Ct = C0
     df[0] = nt = df0
@@ -569,8 +613,8 @@ def filter_python(Y, F, G, delta, beta, df0, v0, m0, C0):
         obs = Y[i]
 
         # column vector, for W&H notational consistency
-        Ft = F[i]
-        # Ft = F[i:i+1].T
+        # Ft = F[i]
+        Ft = F[i:i+1].T
 
         # advance index: y_1 through y_nobs, 0 is prior
         t = i + 1
@@ -587,15 +631,16 @@ def filter_python(Y, F, G, delta, beta, df0, v0, m0, C0):
                 Rt = Ct / delta
 
         # Qt = chain_dot(Ft.T, Rt, Ft) + St
-        Qt = chain_dot(Ft, Rt, Ft) + St
+        Qt = chain_dot(Ft.T, Rt, Ft) + St
         At = np.dot(Rt, Ft) / Qt
 
         # forecast theta as time t
-        ft = np.dot(Ft, at)
+        ft = np.dot(Ft.T, at)
         e = obs - ft
 
         # update mean parameters
-        mode[t] = mt = at + (At * e).squeeze()
+        st()
+        mode[t] = mt = at + np.dot(At, e)
         dt = beta * dt + St * e * e / Qt
         nt = beta * nt + 1
         St = dt / nt

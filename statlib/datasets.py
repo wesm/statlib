@@ -88,6 +88,14 @@ def eeg400_data():
     data = re.sub('[\s\n]+', ' ', data).split()
     return np.array(data, dtype=float)
 
+def eeg_Cz():
+    """
+    Cz series
+    """
+    data = open(os.path.join(data_path, 'eegCz.dat')).read().strip()
+    data = re.sub('[\s\n]+', ' ', data).split()
+    return np.array(data, dtype=float)
+
 def eeg_data():
     """
     Cz series, 3600 data points

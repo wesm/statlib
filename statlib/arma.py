@@ -6,6 +6,7 @@ import scipy.stats as stats
 import statlib.plotting as plotting
 import statlib.dlm as dlm
 
+from pandas import DataMatrix
 from pandas.util.testing import set_trace, debug
 
 from scikits.statsmodels.tools.decorators import cache_readonly
@@ -155,19 +156,18 @@ class ARDecomp(object):
         (self.modulus, self.frequency,
          self.wavelength, self.H) = self._compute_decomp()
 
+        self.result = DataMatrix({'wavelength' : self.wavelength,
+                                 'modulus' : self.modulus,
+                                 'frequency' : self.frequency},
+                                 columns=['modulus', 'wavelength', 'frequency'])
+
     def __repr__(self):
         from cStringIO import StringIO
-        from pandas import DataMatrix
-
-        table = DataMatrix({'wavelength' : self.wavelength,
-                            'modulus' : self.modulus,
-                            'frequency' : self.frequency},
-                           columns=['modulus', 'wavelength', 'frequency'])
 
         buf = StringIO()
 
         print >> buf, 'AR(%d) decomposition' % self.p
-        print >> buf, table
+        print >> buf, self.result
 
         return buf.getvalue()
 
