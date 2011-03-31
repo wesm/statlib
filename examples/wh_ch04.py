@@ -13,9 +13,9 @@ y, x = datasets.table_33()
 
 X = np.vstack((np.ones(len(x)),x )).T
 
-mean_prior = ([0, 0.45], [[0.005, 0],
+m0, C0 = ([0, 0.45], [[0.005, 0],
                           [0, 0.0025]])
-var_prior = (1, 1)
+n0, s0 = (1, 1)
 
 G = np.diag([lam, phis[0]])
 
@@ -23,8 +23,8 @@ like = []
 for phi in phis:
     G = np.diag([lam, phi])
 
-    model = DLM(y, X, G=G, mean_prior=mean_prior,
-                var_prior=var_prior, discount=disc)
+    model = DLM(y, X, G=G, m0=m0, C0=C0, n0=n0, s0=s0,
+                state_discount=disc)
 
     like.append(model.pred_like)
 
@@ -39,5 +39,5 @@ ax2 = fig.add_subplot(212)
 ax2.plot(phis, llr, label='LogLR')
 plt.show()
 
-model = dlm.DLM(y, X, G=G, mean_prior=mean_prior,
-                var_prior=var_prior, discount=disc)
+model = dlm.DLM(y, X, G=G, m0=m0, C0=C0, n0=n0, s0=s0,
+                state_discount=disc)

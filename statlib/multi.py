@@ -143,8 +143,8 @@ class MultiProcessDLM(object):
     cf. W&H Section 12.4
     """
     def __init__(self, y, F, models, order, prior_model_prob,
-                 mean_prior=None, var_prior=None, approx_steps=1.):
-
+                 m0=None, C0=None, n0=None, s0=None, approx_steps=1.):
+        self.approx_steps = approx_steps
         self.dates = y.index
         self.y = np.array(y)
         self.nobs = len(y)
@@ -171,9 +171,6 @@ class MultiProcessDLM(object):
         self.approx_steps = 1
         # self.approx_steps = int(approx_steps)
 
-        self.mean_prior = mean_prior
-        self.var_prior = var_prior
-
         # set up result storage for all the models
         self.marginal_prob = nan_array(self.nobs + 1, self.nmodels)
         self.post_prob = nan_array(self.nobs + 1,
@@ -190,15 +187,15 @@ class MultiProcessDLM(object):
 
         # set in initial values
         self.marginal_prob[0] = self.prior_model_prob
-        self.mu_mode[0], self.mu_scale[0] = mean_prior
+        self.mu_mode[0] = m0
+        self.mu_scale[0] = C0
 
         # observation variance stuff
-        n, d = var_prior
-        self.df = n + np.arange(self.nobs + 1) # precompute
+        self.df = n0 + np.arange(self.nobs + 1) # precompute
         self.var_est = nan_array(self.nobs + 1, self.nmodels)
         self.var_scale = nan_array(self.nobs + 1, self.nmodels)
-        self.var_est[0] = d / n
-        self.var_scale[0] = d
+        self.var_est[0] = s0
+        self.var_scale[0] = s0 * n0
 
         # forecasts are computed via mixture for now
         self.forc_var = nan_array(self.nobs, self.nmodels, self.nmodels)

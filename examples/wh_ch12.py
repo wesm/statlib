@@ -12,6 +12,7 @@ reload(multi)
 from statlib.dlm import *
 from statlib.multi import *
 import statlib.datasets as datasets
+import statlib.tools as tools
 
 from pandas import DataMatrix
 
@@ -46,8 +47,7 @@ def get_multi_model():
 
     multi = MultiProcessDLM(cp6, E2, models, order,
                             prior_model_prob,
-                            mean_prior=mean_prior,
-                            var_prior=var_prior,
+                            m0=m0, C0=C0, n0=n0, s0=s0,
                             approx_steps=1)
 
     return multi
@@ -56,15 +56,14 @@ if __name__ == '__main__':
 
     y = datasets.table_22()
     x = [[1]]
-    mean_prior = (0, 1)
-    var_prior = (1, 0.01)
+    m0, C0 = (0, 1)
+    n0, s0 = (1, 0.01)
     discounts = np.arange(0.7, 1.01, 0.1)
 
     models = {}
     for delta in discounts:
-        models['%.2f' % delta] = DLM(y, x, mean_prior=mean_prior,
-                                     var_prior=var_prior,
-                                     discount=delta)
+        models['%.2f' % delta] = DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
+                                     state_discount=delta)
 
     mix = DLMMixture(models)
     multi = get_multi_model()

@@ -2,13 +2,14 @@ from numpy.random import randn
 from numpy.linalg import inv
 import numpy as np
 import numpy.linalg as LA
+import scipy.stats as stats
 import statlib.plotting as plotting
+import statlib.dlm as dlm
 
-from pandas.util.testing import set_trace as st
+from pandas.util.testing import set_trace, debug
 
-from scikits.statsmodels.tsa.arima import ARMA as sm_arma
-from scikits.statsmodels.tsa.stattools import acf
 from scikits.statsmodels.tools.decorators import cache_readonly
+import scikits.statsmodels.tsa.api as tsa_api
 
 import scikits.statsmodels.api as sm
 
@@ -19,20 +20,39 @@ class ARModel(object):
         self.p = p
 
         self.arx = data - data.mean()
-        self.exog, self.endog = _prep_arvars(self.arx, p)
+        self.endog, self.exog = _prep_arvars(self.arx, p)
 
     @cache_readonly
     def ref_results(self):
-        return sm.OLS(self.exog, self.endog).fit()
+        return tsa_api.AR(self.arx).fit(self.p, trend='nc')
 
     @property
     def dlm_rep(self):
         """
         DLM form of AR(p) state transition matrix
         """
-        beta = LA.lstsq(self.endog, self.exog)[0]
+        beta = LA.lstsq(self.exog, self.endog)[0]
         lower = np.c_[np.eye(self.p-1), np.zeros((self.p-1, 1))]
         return np.vstack((beta, lower))
+
+    def fit_dlm(self, m0, M0, n0, s0, discount=1.):
+        """
+        Fit dynamic linear model to the data, with the AR parameter as the state
+        vector
+
+        Parameters
+        ----------
+        m0 : ndarray (p)
+        M0 : ndarray (p x p)
+        n0 : int / float
+        s0 : float
+
+        Returns
+        -------
+        model : DLM
+        """
+        return dlm.DLM(self.endog, self.exog, mean_prior=(m0, M0),
+                       var_prior=(n0, s0), discount=discount)
 
     def decomp(self):
         """
@@ -53,10 +73,11 @@ class ARModel(object):
             decomp : n x k
         """
         p = self.p
-        X = self.endog
+        X = self.exog
 
         vals, vecs = LA.eig(self.dlm_rep)
 
+        # (B_t'F) B_t^-1, where F = [1, 0, ..., 0]
         H = np.dot(np.diag(vecs[0]), inv(vecs))
 
         mods = np.abs(vals)
@@ -155,6 +176,78 @@ def ar_simulate(phi, s, n, dist='normal'):
 
     return out
 
+def ar_model_like(data, maxp, m0, M0, n0, s0):
+    """
+    Compute approximate marginal likelihood for univariate AR(p) model for
+    p=0,...maxp.
+
+    Parameters
+    ----------
+    data
+    maxp : int
+        Maximum model order
+    m0 : ndarray (maxp x maxp)
+        Prior mean for state
+    M0 : ndarray (maxp x maxp)
+        Prior state variance matrix
+    n0 : int / float
+        Prior degrees of freedom for obs var
+    s0 : float
+        Prior estimate of observation variance
+
+    Notes
+    -----
+    p(\theta) ~ N(m0, M0)
+    \nu ~ IG(n0 / 2, n0 * s0 / 2)
+    """
+    from scipy.special import gammaln as gamln
+
+    arx = data - data.mean()
+    nobs = len(arx)
+
+    result = np.zeros(maxp + 1)
+    for p in xrange(maxp + 1):
+        llik = 0.
+        model = ARModel(data, p=p)
+
+        mt = m0[:p]; Mt = M0[:p, :p]
+        st = s0; nt = n0
+
+        # dlm_model = model.fit_dlm(m0[:p], M0[:p, :p], n0, s0)
+        # F = dlm_model.F
+        # y = dlm_model.y
+
+        # for t in xrange(p, nobs - p):
+        #     nt = dlm_model.df[t]
+        #     q = dlm_model.forc_var[t-1]
+        #     st = dlm_model.var_est[t - 1]
+        #     e = y[t - 1] - np.dot(F[t - 1], dlm_model.mu_mode[t - 1])
+
+        #     # Student-t log pdf
+        #     sd = np.sqrt(q * st)
+        #     llik += stats.t(nt).logpdf(e / sd) - np.log(sd)
+
+        for t in xrange(p, nobs):
+            # DLM update equations
+            x = arx[t-p:t][::-1]
+            A = np.dot(Mt, x); q = np.dot(x, A) + 1; A /= q
+            e = arx[t] - np.dot(x, mt)
+
+            if t >= 2 * maxp:
+                sd = np.sqrt(q * st)
+                llik += stats.t(nt).logpdf(e / sd) - np.log(sd)
+            mt = mt + A * e
+            st = (nt * st + np.dot(e, e) / q) / (nt + 1)
+            nt = nt + 1
+            Mt = Mt - np.outer(A, A) * q
+
+        result[p] = llik
+
+    popt = result.argmax()
+    maxlik = result[popt]
+
+    return result
+
 if __name__ == '__main__':
     from statlib.linmod import BayesLM
     import statlib.datasets as ds
@@ -168,7 +261,13 @@ if __name__ == '__main__':
     p = 8
     y, X = _prep_arvars(eeg, p)
 
-    beta_prior = (np.zeros(p), np.eye(p) * 100)
-    var_prior = (2, 1000)
+    m0, M0 = np.zeros(p), np.eye(p) * 100
+    n0, s0 = 2, 1000
+    beta_prior = (m0, M0)
+    var_prior = (n0, s0)
 
     model2 = BayesLM(y, X, beta_prior, var_prior)
+
+    maxp = 20
+    result = ar_model_like(eeg, maxp, np.zeros(maxp),
+                           np.eye(maxp) * 1, 1, 1)

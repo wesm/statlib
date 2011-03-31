@@ -12,10 +12,10 @@ import statlib.datasets as datasets
 
 def ex_21():
     y = datasets.table_22()
-    x = np.ones(len(y), dtype=float)
+    x = [1]
 
-    mean_prior = (0, 1)
-    var_prior = (1, 0.01)
+    m0, C0 = (0, 1)
+    n0, s0 = (1, 0.01)
 
     discount_factors = np.arange(0.6, 1.01, 0.05)
 
@@ -38,8 +38,8 @@ def ex_21():
     mu = []
 
     for disc in discount_factors:
-        model = dlm.DLM(y, x, mean_prior=mean_prior,
-                        var_prior=var_prior, discount=disc)
+        model = dlm.DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
+                        state_discount=disc)
 
         ax1.plot(rng, model.forecast, '%.2f' % (1 - disc))
 
@@ -110,14 +110,12 @@ if __name__ == '__main__':
     y = datasets.table_22()
     x = [1]
 
-    mean_prior = (0, 1)
-    var_prior = (1, 0.01)
+    m0, C0 = (0, 1)
+    n0, s0 = (1, 0.01)
 
-    model3 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                 discount=0.1)
-
-    model = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                discount=.9)
-    model2 = DLM(y, x, mean_prior=mean_prior, var_prior=var_prior,
-                 discount=0.9)
-
+    model = DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
+                state_discount=.9)
+    model2 = DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
+                 state_discount=0.9)
+    model3 = DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
+                 state_discount=0.1)

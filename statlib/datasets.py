@@ -80,10 +80,19 @@ def foo():
 
     return pn.DataFrame(datad)
 
-def eeg_data():
+def eeg400_data():
+    """
+    Cz series, 400 data points
+    """
     data = open(os.path.join(data_path, 'eeg.dat')).read().strip()
     data = re.sub('[\s\n]+', ' ', data).split()
     return np.array(data, dtype=float)
+
+def eeg_data():
+    """
+    Cz series, 3600 data points
+    """
+    return np.loadtxt('statlib/data/eeg2.dat')
 
 def parse_table_22():
     path = os.path.join(data_path, 'Table2.2.data.txt')

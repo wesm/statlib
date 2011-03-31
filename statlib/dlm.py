@@ -26,6 +26,8 @@ import scipy.stats as stats
 from statlib.tools import chain_dot, nan_array
 import statlib.distributions as distm
 
+from pandas.util.testing import set_trace as st
+
 m_ = np.array
 
 def nct_pdf(x, df, nc):
@@ -34,25 +36,50 @@ def nct_pdf(x, df, nc):
     return dt(x, df, nc)
 
 class DLM(object):
-    """
-    Bayesian Gaussian Dynamic Linear Model (DLM) with discount factor
+    r"""
+    Bayesian Gaussian Dynamic Linear Model (DLM) with discount factors
 
     Parameters
     ----------
     y : ndarray n x 1
         Response variable
-    F : ndarray n x k
+    F : ndarray (n x k or 1d for constant Ft = F)
         Regressor matrix
     G : ndarray k x k
         State transition matrix
-    mean_prior : tuple (mean, variance)
-        mean: length k
-        variance: k x k
-        Normal prior for mean response
-    var_prior : tuple (a, b)
-        Inverse-gamma prior for observation variance
-    discount : float
+    m0 : ndarray k
+        Prior mean for state vector
+    C0 : ndarray k x k
+        Prior covariance for state vector
+    n0 : int
+        Prior degrees of freedom for observation variance
+    s0 : float
+        Prior point estimate of observation variance
+    state_discount : float
+        Discount factor for determining state evolution variance
         Wt = Ct * (1 - d) / d
+    var_discount : float
+        Discount factor for observational variance
+
+    Notes
+    -----
+    Normal dynamic linear model (DLM) in state space form
+
+    .. math::
+
+        y = F_t' \theta_t + \nu_t \\
+        \theta_t = G_t \theta_{t-1} + \omega_t \\
+        \nu_t \sim N(0, V_t) \\
+        \omega_t \sim N(0, W_t) \\
+        W_t = C_t (1 - \delta) / \delta \\
+        IG(df0 / 2, df0 * v0 / 2)
+
+    Priors
+
+    .. math::
+
+        {\sf Normal}(m_0, C_0)\\
+        {\sf InverseGamma}(n_0 / 2, n_0 s_0 / 2)
     """
     F = None
     mu_mode = None # mt
@@ -62,47 +89,69 @@ class DLM(object):
     var_est = None # St
     forc_var = None # Qt
 
-    def __init__(self, y, F, G=None, mean_prior=None, var_prior=None,
-                 discount=0.9):
-        self.dates = y.index
-        self.y = m_(y)
-        self.nobs = len(y)
+    def __init__(self, y, F, G=None, m0=None, C0=None, n0=None, s0=None,
+                 mean_prior=None, var_prior=None, discount=None,
+                 state_discount=0.9, var_discount=1.):
+        try:
+            self.dates = y.index
+        except AttributeError:
+            self.dates = None
 
-        if self.y.ndim == 1:
+        y = m_(y)
+        if y.ndim == 1:
             pass
         else:
             raise Exception
 
+        self.y = y
+        self.nobs = len(y)
+
+        constant = False
+
         F = m_(F)
         if F.ndim == 1:
-            self.ndim = len(F)
+            if len(F) == len(y):
+                self.ndim = 1
+            else:
+                constant = True
+                self.ndim = len(F)
         else:
             self.ndim = F.shape[1]
 
         f_shape = self.nobs, self.ndim
+        # HACK ?
         # constant DLM handling
         if F.ndim == 1:
-            self.F = np.ones(f_shape) * F
+            if constant:
+                F = np.ones(f_shape) * F
+            else:
+                F = F.reshape(f_shape)
         else:
             if len(F) == 1 and self.nobs > 1:
                 F = np.ones(f_shape) * F[0]
-            self.F = F
+
+        self.F = F
 
         if G is None:
             G = np.eye(self.ndim)
 
         self.G = G
 
-        self.mean_prior = mean_prior
-        self.var_prior = var_prior
-        self.disc = discount
+        # HACK for transition
+        if discount is not None:
+            state_discount = discount
 
-        df0, df0v0 = var_prior
-        self.df = df0 + np.arange(self.nobs + 1) # precompute
+        self.state_discount = state_discount
+        self.var_discount = var_discount
 
-        self.m0, self.C0 = mean_prior
-        self.df0 = df0
-        self.v0 = df0v0 / df0
+        if mean_prior is not None:
+            m0, C0 = mean_prior
+
+        if var_prior is not None:
+            n0, s0 = var_prior
+
+        self.m0, self.C0 = m0, C0
+        self.df0, self.s0 = n0, s0
 
         self._compute_parameters()
 
@@ -124,11 +173,15 @@ class DLM(object):
         (self.mu_mode,
          self.mu_forc_mode,
          self.mu_scale,
+         self.df,
          self.var_est,
          self.forc_var,
-         self.mu_forc_scale) = _filter_python(self.y, self.F, self.G, self.disc,
-                                              self.df0, self.v0, self.m0,
-                                              self.C0)
+         self.mu_forc_scale) = _filter_python(self.y, self.F,
+                                              self.G,
+                                              self.state_discount,
+                                              self.var_discount,
+                                              self.df0, self.s0,
+                                              self.m0, self.C0)
 
     def backward_sample(self, steps=1):
         """
@@ -224,9 +277,10 @@ class DLM(object):
 
     @property
     def forc_dist(self):
+        delta = self.state_discount
         return stats.t(self.df[:-1],
                        loc=self.mu_mode[:-1],
-                       scale=self.mu_scale[:-1] / self.disc)
+                       scale=self.mu_scale[:-1] / delta)
 
     @property
     def mupost_dist(self):
@@ -265,14 +319,14 @@ class DLM(object):
         diags = self.mu_scale[:, _x, _y]
 
         # Only care about marginal scale
-        delta = self.disc
+        delta = self.state_discount
         if isinstance(delta, np.ndarray):
             delta = np.diag(delta)
 
         if prior:
             df = self.df[:-1]
             mode = self.mu_mode[:-1]
-            scale = np.sqrt(diags[:-1] / self.disc)
+            scale = np.sqrt(diags[:-1] / delta)
         else:
             df = self.df[1:]
             mode = self.mu_mode[1:]
@@ -289,19 +343,16 @@ class DLM(object):
         return distm.make_t_ci(self.df[:-1], self.forecast,
                                np.sqrt(self.forc_var), alpha=alpha)
 
-    def fit(self, discount=0.9):
-        pass
+class VarDiscountDLM(DLM):
+    pass
 
 class DLM2(DLM):
 
     def _compute_parameters(self):
-        df0, df0v0 = self.var_prior
-        v0 = float(df0v0) / df0
-
-        m0, C0 = self.mean_prior
-
         (mode, a, Q, C, S) = _filter_cython(self.y, self.F, self.G,
-                                            self.disc, df0, v0, m0, C0)
+                                            self.state_discount,
+                                            self.df0, self.s0,
+                                            self.m0, self.C0)
 
         self.forc_var = Q
         self.mu_forc_mode = a
@@ -457,7 +508,80 @@ def _mvfilter_python(Y, F, G, V, delta, beta, df0, v0, m0, C0):
 
     return mode, a, C, S, Q
 
-def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
+from line_profiler import LineProfiler
+prof = LineProfiler()
+
+class DLMFilter(object):
+    # should go into Cython
+    pass
+
+def _filter_python_multi(Y, F, G, delta, df0, v0, m0, C0):
+    """
+    Univariate DLM update equations with unknown observation variance
+
+    Done with numpy.matrix objects so works with multivariate case. About 3-4x
+    slower than specializing to the 1d case and using vectors / regular ndarrays
+    """
+    nobs = len(Y)
+    ndim = len(G)
+
+    mode = nan_array(nobs + 1, ndim)
+    a = nan_array(nobs + 1, ndim)
+    C = nan_array(nobs + 1, ndim, ndim)
+    S = nan_array(nobs + 1)
+    Q = nan_array(nobs)
+    R = nan_array(nobs + 1, ndim, ndim)
+
+    df = df0 + np.arange(nobs + 1) # precompute
+    S[0] = St = float(v0)
+
+    mode[0] = m0
+    C[0] = Ct = np.asmatrix(C0)
+
+    mt = np.asmatrix(m0).T
+    Y = np.asmatrix(Y).T
+    F = np.asmatrix(F)
+    G = np.asmatrix(G)
+
+    # allocate result arrays
+    for i in xrange(nobs):
+        # column vector, for W&H notational consistency
+        Yt = Y[i].T
+        Ft = F[i].T
+
+        # advance index: y_1 through y_nobs, 0 is prior
+        t = i + 1
+
+        # derive innovation variance from discount factor
+        at = mt
+        Rt = Ct
+        if t > 1:
+            # only discount after first time step!
+            if G is not None:
+                at = G * mt
+                Rt = G * Ct * G.T / delta
+            else:
+                Rt = Ct / delta
+
+        Q[t-1] = Qt = Ft.T * Rt * Ft + St
+        At = Rt * Ft / Qt
+
+        # forecast theta as time t
+        ft = Ft.T * at
+        e = Yt - ft
+
+        # update mean parameters
+        mt = at + At * e
+        S[t] = St = St + (St / df[t]) * (e * e.T / Qt - 1)
+        C[t] = Ct = (St / S[t-1]) * (Rt - At * At.T * Qt)
+
+        mode[t] = mt.T
+        a[t] = at.T
+        R[t] = Rt
+
+    return mode, a, C, S, Q, R
+
+def _filter_python_old(Y, F, G, delta, df0, v0, m0, C0):
     """
     Univariate DLM update equations with unknown observation variance
     """
@@ -501,18 +625,87 @@ def _filter_python(Y, F, G, delta, df0, v0, m0, C0):
 
         # forecast theta as time t
         ft = np.dot(Ft.T, at)
-        err = obs - ft
+        e = obs - ft
 
         # update mean parameters
-        mode[t] = at + np.dot(At, err)
-        S[t] = S[t-1] + (S[t-1] / df[t]) * ((err ** 2) / Qt - 1)
+        mode[t] = at + np.dot(At, e)
+        S[t] = S[t-1] + (S[t-1] / df[t]) * ((e ** 2) / Qt - 1)
         C[t] = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
 
         a[t] = at
         Q[t-1] = Qt
         R[t] = Rt
 
-    return mode, a, C, S, Q, R
+    return mode, a, C, df, S, Q, R
+
+def _filter_python(Y, F, G, delta, beta, df0, v0, m0, C0):
+    """
+    Univariate DLM update equations with unknown observation variance
+
+    delta : state discount
+    beta : variance discount
+    """
+    nobs = len(Y)
+    ndim = len(G)
+
+    mode = nan_array(nobs + 1, ndim)
+    a = nan_array(nobs + 1, ndim)
+    C = nan_array(nobs + 1, ndim, ndim)
+    S = nan_array(nobs + 1)
+    Q = nan_array(nobs)
+    R = nan_array(nobs + 1, ndim, ndim)
+    df = nan_array(nobs + 1)
+
+    mode[0] = mt = m0
+    C[0] = Ct = C0
+    df[0] = nt = float(df0)
+    S[0] = St = v0
+
+    dt = df0 * v0
+
+    # allocate result arrays
+    for i, obs in enumerate(Y):
+        # column vector, for W&H notational consistency
+        Ft = F[i:i+1].T
+
+        # advance index: y_1 through y_nobs, 0 is prior
+        t = i + 1
+
+        # derive innovation variance from discount factor
+        at = mt
+        Rt = Ct
+        if t > 1:
+            # only discount after first time step?
+            if G is not None:
+                at = np.dot(G, mt)
+                Rt = chain_dot(G, Ct, G.T) / delta
+            else:
+                Rt = Ct / delta
+
+        Qt = chain_dot(Ft.T, Rt, Ft) + St
+        At = np.dot(Rt, Ft) / Qt
+
+        # forecast theta as time t
+        ft = np.dot(Ft.T, at)
+        e = obs - ft
+
+        # update mean parameters
+        mode[t] = mt = at + np.dot(At, e)
+        dt = beta * dt + St * e * e / Qt
+        nt = beta * nt + 1
+        St = dt / nt
+
+        S[t] = St
+        Ct = (S[t] / S[t-1]) * (Rt - np.dot(At, At.T) * Qt)
+        Ct = (Ct + Ct.T) / 2 # symmetrize
+
+        df[t] = nt
+        C[t] = Ct
+        a[t] = at
+        Q[t-1] = Qt
+        R[t] = Rt
+
+    return mode, a, C, df, S, Q, R
 
 def rmatnorm(M, U, V):
     """
@@ -577,8 +770,12 @@ if __name__ == '__main__':
     m0 = np.zeros((p, k))
     m0[1:k+1] = np.eye(k)
 
-    mean_prior = m0, 1000 * np.eye(p)
-    var_prior = 2, D0
+    C0 = 1000 * np.eye(p)
+
+    n0 = 2
+
+    mean_prior = m0, C0
+    var_prior = n0, D0
 
     model = MVDLM(Y, F,
                   state_discount=delta, cov_discount=beta,

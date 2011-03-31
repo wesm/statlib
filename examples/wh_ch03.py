@@ -22,15 +22,16 @@ def ex_310():
     fig, axes = plt.subplots(3, 3, sharey=True, figsize=(12, 12))
 
     for i, disc in enumerate(discount_factors):
-        model = dlm.DLM(y, x, mean_prior=mean_prior,
-                        var_prior=var_prior, discount=disc)
+        model = dlm.DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
+                        state_discount=disc)
 
         rmse.append(model.rmse)
         mad.append(model.mad)
         like.append(model.pred_like)
 
         var_est.append(model.var_est[-1])
-        pred_var.append(model.forc_var[-1]) # model.var_est[-1] + model.mu_scale[-1] / disc
+        # model.var_est[-1] + model.mu_scale[-1] / disc
+        pred_var.append(model.forc_var[-1])
 
         ax = axes[i / rows][i % rows]
 
@@ -62,8 +63,8 @@ def ex_310():
 if __name__ == '__main__':
     y, x = datasets.table_33()
 
-    mean_prior = (0.45, 0.0025)
-    var_prior = (1, 1)
+    m0, C0 = (0.45, 0.0025)
+    n0, s0 = (1, 1)
 
-    model = dlm.DLM(y, x, mean_prior=mean_prior,
-                    var_prior=var_prior, discount=0.6)
+    model = dlm.DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
+                    state_discount=0.6)
