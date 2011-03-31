@@ -40,14 +40,11 @@ def get_multi_model():
     # priors
     m0 = np.array([600., 10.])
     C0 = np.diag([10000., 25.])
-    n0, d0 = 10, 1440
-
-    mean_prior = (m0, C0)
-    var_prior = (n0, d0)
+    n0, d0 = 10., 1440.
 
     multi = MultiProcessDLM(cp6, E2, models, order,
                             prior_model_prob,
-                            m0=m0, C0=C0, n0=n0, s0=s0,
+                            m0=m0, C0=C0, n0=n0, s0=d0 / n0,
                             approx_steps=1)
 
     return multi
