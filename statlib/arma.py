@@ -32,10 +32,9 @@ class ARModel(object):
         DLM form of AR(p) state transition matrix
         """
         beta = LA.lstsq(self.exog, self.endog)[0]
-        lower = np.c_[np.eye(self.p-1), np.zeros((self.p-1, 1))]
-        return np.vstack((beta, lower))
+        return ar_dlm_rep(beta)
 
-    def fit_dlm(self, m0, M0, n0, s0, discount=1.):
+    def fit_dlm(self, m0, C0, n0, s0, discount=1.):
         """
         Fit dynamic linear model to the data, with the AR parameter as the state
         vector
@@ -51,64 +50,12 @@ class ARModel(object):
         -------
         model : DLM
         """
-        return dlm.DLM(self.endog, self.exog, mean_prior=(m0, M0),
-                       var_prior=(n0, s0), discount=discount)
+        return dlm.DLM(self.endog, self.exog, m0=m0, C0=C0, n0=n0, s0=s0,
+                       state_discount=discount)
 
     def decomp(self):
-        """
-        Compute decomposition of input time series into components
-
-        Notes
-        -----
-        W&H p. 302
-        Compute G = B A B^-1
-        Decompose x_t,j = (H theta_t)_j where H = B'E B^-1
-        E = (1, 0, ..., 0)
-
-        Returns
-        -------
-        tup : tuple (waves, mods, decomp)
-            wavelengths : length k
-            moduli : length k
-            decomp : n x k
-        """
-        p = self.p
-        X = self.exog
-
-        vals, vecs = LA.eig(self.dlm_rep)
-
-        # (B_t'F) B_t^-1, where F = [1, 0, ..., 0]
-        H = np.dot(np.diag(vecs[0]), inv(vecs))
-
-        mods = np.abs(vals)
-        angles = np.angle(vals)
-        angles[angles == 0] = np.pi
-
-        # Put everything in order of increasing angles and ignore negative
-        # angles
-        sorter = np.argsort(angles)
-        angles = angles[sorter]
-        mask = angles > 0
-
-        angles = angles[mask]
-        mods = mods[sorter][mask]
-        vecs = vecs[sorter][mask]
-
-        # convert to real
-        H = H[sorter][mask].real
-        # double the complex H coefficients, z_t,j = x_t,d + x_t,h
-        # complex components are at the beginning because we set the real
-        # component angles to pi
-        H[:(-mask).sum()] *= 2
-
-        states = np.c_[np.zeros((p, p-1)),   # "initial states"
-                       X.T,                  # regressor matrix
-                       self.arx[:-(p+1):-1]] # time t
-        decomp = np.dot(H, states).T
-
-        waves = 2 * np.pi / angles
-
-        return waves, mods, decomp
+        beta = LA.lstsq(self.exog, self.endog)[0]
+        return ARDecomp(beta)
 
     def plot_acf(self, lags=50, partial=True):
         plotting.plot_acf(self.data, lags, partial=partial)
@@ -175,6 +122,118 @@ def ar_simulate(phi, s, n, dist='normal'):
         out[t] += phi * out[t - 1]
 
     return out
+
+def ar_dlm_rep(phi):
+    p = len(phi)
+    lower = np.c_[np.eye(p-1), np.zeros((p-1, 1))]
+    return np.vstack((phi, lower))
+
+class ARDecomp(object):
+    """
+    Compute decomposition of input time series into components using eigenvalue
+    decomposition
+
+    Notes
+    -----
+    W&H p. 302
+    Compute G = B A B^-1
+    Decompose x_t,j = (H theta_t)_j where H = B'E B^-1
+    E = (1, 0, ..., 0)
+
+    Returns
+    -------
+    tup : tuple (waves, mods, decomp)
+        wavelengths : length k
+        moduli : length k
+        decomp : n x k
+    """
+
+    def __init__(self, phi):
+        self.phi = phi
+        self.p = len(phi)
+
+        (self.modulus, self.frequency,
+         self.wavelength, self.H) = self._compute_decomp()
+
+    def __repr__(self):
+        from cStringIO import StringIO
+        from pandas import DataMatrix
+
+        table = DataMatrix({'wavelength' : self.wavelength,
+                            'modulus' : self.modulus,
+                            'frequency' : self.frequency},
+                           columns=['modulus', 'wavelength', 'frequency'])
+
+        buf = StringIO()
+
+        print >> buf, 'AR(%d) decomposition' % self.p
+        print >> buf, table
+
+        return buf.getvalue()
+
+    def _compute_decomp(self):
+        # see class docstring
+        vals, vecs = LA.eig(ar_dlm_rep(self.phi))
+
+        # (B_t'F) B_t^-1, where F = [1, 0, ..., 0]
+        H = np.dot(np.diag(vecs[0]), inv(vecs))
+
+        mods = np.abs(vals)
+        angles = np.angle(vals)
+        angles[angles == 0] = np.pi
+
+        # Put everything in order of increasing angles and ignore negative
+        # angles
+        sorter = np.argsort(angles)
+        angles = angles[sorter]
+        mask = angles > 0
+
+        angles = angles[mask]
+        mods = mods[sorter][mask]
+        vecs = vecs[sorter][mask]
+        waves = 2 * np.pi / angles
+
+        # convert to real
+        H = H[sorter][mask].real
+        # double the complex H coefficients, z_t,j = x_t,d + x_t,h
+        # complex components are at the beginning because we set the real
+        # component angles to pi
+        H[:(-mask).sum()] *= 2
+
+        return mods, angles, waves, H
+
+    def decompose_ts(self, y, X):
+        """
+        y : response variable (n)
+            Need for time t
+        X : lagged responses (n x p)
+        """
+        states = np.c_[np.zeros((self.p, self.p-1)),   # "initial states"
+                       X.T,                  # regressor matrix
+                       y[:-(self.p+1):-1]] # time t
+        return np.dot(self.H, states).T
+
+def ar_decomp(phi, y, X):
+    """
+    Compute decomposition of input time series into components
+
+    Notes
+    -----
+    W&H p. 302
+    Compute G = B A B^-1
+    Decompose x_t,j = (H theta_t)_j where H = B'E B^-1
+    E = (1, 0, ..., 0)
+
+    Returns
+    -------
+    tup : tuple (waves, mods, decomp)
+        wavelengths : length k
+        moduli : length k
+        decomp : n x k
+    """
+
+    return waves, mods, decomp
+
 
 def ar_model_like(data, maxp, m0, M0, n0, s0):
     """
@@ -251,7 +310,7 @@ def ar_model_like(data, maxp, m0, M0, n0, s0):
 if __name__ == '__main__':
     from statlib.linmod import BayesLM
     import statlib.datasets as ds
-    eeg = ds.eeg_data()
+    eeg = ds.eeg400_data()
 
     # model = sm_arma(eeg)
     # res = model.fit(order=(8, 0), method='css', disp=-1)

@@ -4,8 +4,10 @@ Time-varying autoregression (TVAR) model
 
 import numpy as np
 
+from statlib.arma import ARDecomp
 from statlib.components import AR
 import statlib.dlm as dlm
+reload(dlm)
 
 class TVAR(dlm.DLM):
     """
@@ -42,7 +44,21 @@ class TVAR(dlm.DLM):
                          var_discount=var_discount)
 
     def decomp(self):
-        pass
+        moduli = {}
+        wavelengths = {}
+
+        for i, mu in enumerate(self.mu_mode):
+            if i == 0:
+                continue
+
+            dec = ARDecomp(mu)
+            moduli[i] = dec.modulus
+            wavelengths[i] = dec.wavelength
+
+        moduli = DataMatrix(moduli)
+        wavelengths = DataMatrix(wavelengths)
+
+        return moduli, wavelengths
 
 def tvar_gridsearch(model, prange, trange, vrange):
     """
@@ -78,8 +94,10 @@ if __name__ == '__main__':
     s0 = 1
 
     model = TVAR(eeg, p=p, m0=m0, C0=C0, n0=n0, s0=s0,
-                 state_discount=0.994, var_discount=0.95)
+                 state_discount=0.994,
+                 var_discount=0.95)
+    # moduli, wavelengths = model.decomp()
 
-    result = tvar_gridsearch(model, range(12, 13),
-                             np.linspace(0.9, 1, num=10),
-                             np.linspace(0.95, 0.95, num=1))
+    # result = tvar_gridsearch(model, range(12, 13),
+    #                          np.linspace(0.9, 1, num=10),
+    #                          np.linspace(0.95, 0.95, num=1))
