@@ -51,5 +51,5 @@ for chan, decomp in decomps.iteritems():
     freqs[chan] = decomp['frequency'][0]
     mods[chan] = decomp['modulus'].max(1)
 
-freqs = DataMatrix(freqs)
-mods = DataMatrix(mods)
+freqs = pn.DataMatrix(freqs)
+mods = pn.DataMatrix(mods)
