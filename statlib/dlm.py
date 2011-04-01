@@ -495,9 +495,9 @@ class MVDLM(object):
          self.mu_forc_mode,
          self.mu_scale,
          self.var_est,
-         self.forc_var) = filt.filter_python(self.y, self.F, self.G, self.V,
-                                             self.delta, self.beta, self.n0,
-                                             self.D0, self.m0, self.C0)
+         self.forc_var) = _mvfilter_python(self.y, self.F, self.G, self.V,
+                                           self.delta, self.beta, self.n0,
+                                           self.D0, self.m0, self.C0)
 
 
 def _mvfilter_python(Y, F, G, V, delta, beta, df0, v0, m0, C0):
