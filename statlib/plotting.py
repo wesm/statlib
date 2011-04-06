@@ -129,7 +129,7 @@ def adorn_plot(title=None, ylabel=None, xlabel=None):
     plt.ylabel(ylabel, fontsize=16)
     plt.xlabel(xlabel, fontsize=16)
 
-def plot_acf(y, lags=100, partial=False):
+def plot_acf(y, lags=100, partial=False, ax=None):
     from scikits.statsmodels.tsa.stattools import acf, pacf
 
     if partial:
@@ -137,10 +137,12 @@ def plot_acf(y, lags=100, partial=False):
     else:
         the_acf = acf(y, nlags=lags)
 
-    plt.figure(figsize=(10, 5))
-    plt.vlines(np.arange(lags+1), [0], the_acf)
+    if ax is None:
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111)
 
-    plt.axhline(0, color='k')
+    ax.vlines(np.arange(lags+1), [0], the_acf)
+    ax.axhline(0, color='k')
 
 def plot_acf_multiple(ys, lags=20):
     """

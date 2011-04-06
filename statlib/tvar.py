@@ -87,7 +87,8 @@ def tvar_gridsearch(model, prange, trange, vrange):
                                   n0=model.df0, s0=model.s0,
                                   state_discount=t, var_discount=v)
 
-                result[i, j, k] = iter_model.pred_like[maxp-p:].sum()
+                lik = np.log(iter_model.pred_like[maxp-p:])
+                result[i, j, k] = lik.sum()
 
     return result
 
