@@ -183,7 +183,7 @@ class DLM(object):
          self.df,
          self.var_est,
          self.forc_var,
-         self.mu_forc_scale) = filt.filter_python(self.y, self.F,
+         self.mu_forc_scale) = filter_python(self.y, self.F,
                                                   self.G,
                                                   self.state_discount,
                                                   self.var_discount,
@@ -329,10 +329,9 @@ class DLM(object):
 
     @property
     def forc_dist(self):
-        delta = self.state_discount
-        return stats.t(self.df[:-1],
-                       loc=self.mu_mode[:-1],
-                       scale=self.mu_scale[:-1] / delta)
+        df = self.var_discount * self.df[:-1]
+        return stats.t(self.y, df, loc=self.forecast,
+                       scale=np.sqrt(self.forc_var))
 
     @property
     def mupost_dist(self):
@@ -574,6 +573,7 @@ class DLMFilter(object):
 #                   double_t delta, double_t beta,
 #                   double_t df0, double_t v0,
 #                   ndarray m0, ndarray C0):
+@prof
 def filter_python(Y, F, G, delta, beta, df0, v0, m0, C0):
     """
     Univariate DLM update equations with unknown observation variance
@@ -639,7 +639,6 @@ def filter_python(Y, F, G, delta, beta, df0, v0, m0, C0):
         e = obs - ft
 
         # update mean parameters
-        st()
         mode[t] = mt = at + np.dot(At, e)
         dt = beta * dt + St * e * e / Qt
         nt = beta * nt + 1

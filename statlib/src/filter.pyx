@@ -53,7 +53,7 @@ def filter_python_multi(Y, F, G, delta, df0, v0, m0, C0):
             else:
                 Rt = Ct / delta
 
-        Q[t-1] = Qt = Ft.T * Rt * Ft + St
+        Qt = Ft.T * Rt * Ft + St
         At = Rt * Ft / Qt
 
         # forecast theta as time t
@@ -62,9 +62,13 @@ def filter_python_multi(Y, F, G, delta, df0, v0, m0, C0):
 
         # update mean parameters
         mt = at + At * e
-        S[t] = St = St + (St / df[t]) * (e * e.T / Qt - 1)
-        C[t] = Ct = (St / S[t-1]) * (Rt - At * At.T * Qt)
 
+        St = St + (St / df[t]) * (e * e.T / Qt - 1)
+        Ct = (St / S[t-1]) * (Rt - At * At.T * Qt)
+
+        S[t] = St
+        C[t] = Ct
+        Qt[t-1] = Qt
         mode[t] = mt.T
         a[t] = at.T
         R[t] = Rt
@@ -154,7 +158,6 @@ def filter_python(ndarray[double_t, ndim=1] Y,
     a = nan_array(nobs + 1, ndim)
     C = nan_array(nobs + 1, ndim, ndim)
     R = nan_array(nobs + 1, ndim, ndim)
-
     S = nan_array(nobs + 1)
     Q = nan_array(nobs)
     df = nan_array(nobs + 1)
@@ -208,7 +211,6 @@ def filter_python(ndarray[double_t, ndim=1] Y,
 
         df[t] = nt
         Q[t-1] = Qt
-
         C[t] = Ct
         a[t] = at
         R[t] = Rt

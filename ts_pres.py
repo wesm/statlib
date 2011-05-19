@@ -117,6 +117,7 @@ acf_pacf_plot(Cz)
 marglike_plot(Cz, range(40))
 '''
 
+'''
 vrange = np.linspace(0.8, 1, 20)
 trange = np.linspace(0.97, 1, 30)
 prange = range(40)
@@ -130,3 +131,4 @@ ax = plt.gca()
 # ax.plot(vrange, marglik - marglik.max())
 ax.plot(trange, marglik - marglik.max())
 plt.show()
+'''
