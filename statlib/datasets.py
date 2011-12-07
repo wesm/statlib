@@ -4,7 +4,6 @@ import re
 
 import numpy as np
 import pandas as pn
-from pandas.io.parsers import parseCSV
 
 data_path = 'statlib/data'
 
@@ -46,22 +45,22 @@ def table_22():
     Gas consumption data
     """
     path = os.path.join(data_path, 'table22.csv')
-    return parseCSV(path, header=None)['B']
+    return pn.read_csv(path, header=None)['X.2']
 
 def table_81():
     """
     Gas consumption data
     """
     path = os.path.join(data_path, 'table81.csv')
-    return parseCSV(path, header=None)['B']
+    return pn.read_csv(path, header=None)['X.2']
 
 def table_102():
     path = os.path.join(data_path, 'table102.csv')
-    return parseCSV(path)
+    return pn.read_csv(path)
 
 def table_111():
     path = os.path.join(data_path, 'table111.csv')
-    return parseCSV(path)['CP6']
+    return pn.read_csv(path)['CP6']
 
 def foo():
     path = os.path.join(data_path, 'Table11.1.data.txt')

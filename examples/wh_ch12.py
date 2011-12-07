@@ -29,6 +29,10 @@ def get_multi_model():
                         'level' : 0.05,
                         'growth' : 0.03}
 
+    # order = ['standard', 'outlier']
+    # prior_model_prob = {'standard' : 0.90,
+    #                     'outlier' : 0.10}
+
     models = {}
 
     standard = Model(G, [0.9, 0.9], obs_var_mult=1.)
@@ -61,6 +65,15 @@ if __name__ == '__main__':
     for delta in discounts:
         models['%.2f' % delta] = DLM(y, x, m0=m0, C0=C0, n0=n0, s0=s0,
                                      state_discount=delta)
+
+    # G = tools.jordan_form(2)
+    # cp6 = datasets.table_111()
+    # x = [1, 0]
+    # m0, C0 = ([0, 0.45], [[0.005, 0],
+    #                       [0, 0.0025]])
+    # n0, s0 = (1, 1)
+    # std_dlm = DLM(cp6.values, x, G=G, m0=m0, C0=C0, n0=n0, s0=s0,
+    #               state_discount=0.9)
 
     mix = DLMMixture(models)
     multi = get_multi_model()

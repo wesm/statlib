@@ -6,7 +6,6 @@ reload(dlm)
 from statlib.dlm import *
 from statlib.components import *
 import statlib.datasets as datasets
-
 gas = datasets.table_81()
 
 p = 12

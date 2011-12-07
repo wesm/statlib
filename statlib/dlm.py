@@ -275,8 +275,7 @@ class DLM(object):
             plt.figure()
             ax = plt.subplot(111)
 
-        # rng = np.arange(self.nobs)
-        rng = self.dates # np.arange(self.nobs)
+        rng = self._get_x_range()
 
         ci_lower, ci_upper = self.forc_ci(alpha=alpha)
 
@@ -305,7 +304,7 @@ class DLM(object):
                                    figsize=(12, 8))
 
         level, ci_lower, ci_upper = self.mu_ci(prior=prior, alpha=alpha)
-        rng = np.arange(self.nobs)
+        rng = self._get_x_range()
 
         if index is None:
             indices = range(self.ndim)
@@ -326,6 +325,13 @@ class DLM(object):
             ptp = lev.ptp()
             ylim = (lev.min() - 0.5 * ptp, lev.max() + 0.5 * ptp)
             this_ax.set_ylim(ylim)
+
+
+    def _get_x_range(self):
+        if self.dates is None:
+            return np.arange(self.nobs)
+        else:
+            return self.dates
 
     @property
     def forc_dist(self):
